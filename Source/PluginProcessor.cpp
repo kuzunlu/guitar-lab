@@ -147,6 +147,15 @@ void GuitarLabProcessor::rebuildTracker()
     // "fresh" now holds the old tracker and is freed here, on this (non-audio) thread.
 }
 
+int GuitarLabProcessor::popRecordEvents (RecordEvent* dest, int maxEvents)
+{
+    const auto scope = recordFifo.read (std::min (maxEvents, recordFifo.getNumReady()));
+    int n = 0;
+    for (int i = 0; i < scope.blockSize1; ++i) dest[n++] = recordStore[(size_t) (scope.startIndex1 + i)];
+    for (int i = 0; i < scope.blockSize2; ++i) dest[n++] = recordStore[(size_t) (scope.startIndex2 + i)];
+    return n;
+}
+
 int GuitarLabProcessor::popFrames (gl::AnalysisFrame* dest, int maxFrames)
 {
     const auto scope = frameFifo.read (std::min (maxFrames, frameFifo.getNumReady()));
@@ -411,6 +420,17 @@ void GuitarLabProcessor::processBlock (juce::AudioBuffer<float>& audio, juce::Mi
 
     // --- Guitar-to-MIDI tracking ---
     {
+        // Recording clock: chosen once when recording starts. DAW / Play position if running, else a free clock.
+        const bool recording = recordingGuitar.load();
+        if (recording && ! wasRecording)
+        {
+            recordUsesTransport = playing;
+            recordClock = 0.0;
+        }
+        wasRecording = recording;
+        const double recordBase = recordUsesTransport ? ppqStart : recordClock;
+        recordClock += numSamples / samplesPerBeat;
+
         const juce::SpinLock::ScopedTryLockType trackLock (trackerLock);
         if (trackLock.isLocked() && tracker != nullptr && tracker->mode() != gl::TrackMode::Off && numIn > 0)
         {
@@ -422,8 +442,17 @@ void GuitarLabProcessor::processBlock (juce::AudioBuffer<float>& audio, juce::Mi
             tracker->process (ptrs, numIn, numCopied,
                 [&] (int offset, uint8_t status, uint8_t d1, uint8_t d2)
                 {
-                    if (! quiet)
-                        out.addEvent (juce::MidiMessage (status, d1, d2), juce::jlimit (0, numSamples - 1, offset));
+                    if (quiet)
+                        return;
+                    out.addEvent (juce::MidiMessage (status, d1, d2), juce::jlimit (0, numSamples - 1, offset));
+
+                    if (recording)
+                    {
+                        const auto scope = recordFifo.write (1);
+                        const RecordEvent e { recordBase + offset / samplesPerBeat, recordUsesTransport, status, d1, d2 };
+                        if (scope.blockSize1 > 0)      recordStore[(size_t) scope.startIndex1] = e;
+                        else if (scope.blockSize2 > 0) recordStore[(size_t) scope.startIndex2] = e;
+                    }
                 },
                 [this] (const gl::AnalysisFrame& f)
                 {

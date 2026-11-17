@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Midi/PhraseRecorder.h"
 #include "PluginProcessor.h"
 #include "UI/FretboardComponent.h"
 #include "UI/Theme.h"
@@ -53,6 +54,7 @@ namespace gl
     {
     public:
         PhrasePanel (GuitarLabProcessor& p, FretboardComponent& board);
+        ~PhrasePanel() override;
 
         // Fretboard events while this tab is shown.
         void fretPressed (FretPos pos, const juce::ModifierKeys& mods);
@@ -79,6 +81,9 @@ namespace gl
         NoteEvent noteFromControls (FretPos pos) const;
         double stepBeats() const;
         void exportMidi();
+        void startRecording();
+        void stopRecording();
+        void drainRecording();
         juce::File writeTempMidi();
         juce::MidiFile buildMidiFile();
 
@@ -98,6 +103,15 @@ namespace gl
                          chordButton { "Add chord" }, deleteButton { "Delete note" },
                          exportButton { "Export .mid" };
         DragMidiArea dragArea;
+
+        // Recording the real guitar (tracked notes) into the phrase
+        juce::TextButton recordButton { "Record guitar" };
+        juce::Label snapLabel;
+        juce::ComboBox snapBox;
+        PhraseRecorder recorder;
+        bool   recordStarted = false;    // first tracked event arrived
+        double lastRecordBeat = 0.0;
+        std::vector<GuitarLabProcessor::RecordEvent> recordBuffer = std::vector<GuitarLabProcessor::RecordEvent> (4096);
 
         std::vector<FretPos> chordBuilder;
         std::vector<std::string> undoStack;

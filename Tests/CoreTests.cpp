@@ -1,6 +1,7 @@
 // Plain tests for the music logic. No test framework: run the exe, it prints failures and returns 1.
 
 #include "Midi/MidiRenderer.h"
+#include "Midi/PhraseRecorder.h"
 #include "Theory/Reharm.h"
 #include "Theory/Trainer.h"
 #include "Theory/Voicing.h"
@@ -739,8 +740,168 @@ static void testChordTracking()
     }
 }
 
+// ---------------------------------------------------------------------------
+// Recording tracked notes into the phrase
+// ---------------------------------------------------------------------------
+namespace
+{
+    struct Rec
+    {
+        PhraseRecorder r;
+        Instrument g;
+        explicit Rec (PhraseRecorder::Settings s = {}) { r.start (g, s); }
+
+        // string index -> channel (first channel 2)
+        void on (double b, int string, int note, int vel = 100) { r.add (b, (uint8_t) (0x90 | (string + 1)), (uint8_t) note, (uint8_t) vel); }
+        void off (double b, int string, int note)               { r.add (b, (uint8_t) (0x80 | (string + 1)), (uint8_t) note, 0); }
+        void bend (double b, int string, double semis)
+        {
+            const int v = pitchBendValue (semis, 12);
+            r.add (b, (uint8_t) (0xE0 | (string + 1)), (uint8_t) (v & 0x7F), (uint8_t) (v >> 7));
+        }
+    };
+}
+
+static void testRecorder()
+{
+    // Single note goes to the cursor (startAt), on the right string and fret.
+    {
+        PhraseRecorder::Settings s; s.startAt = 2.0;
+        Rec t (s);
+        t.on (10.0, 5, 45);
+        t.off (10.5, 5, 45);
+        auto notes = t.r.finish (11.0);
+        check (notes.size() == 1 && notes[0].string == 5 && notes[0].fret == 5, "recorded A2 = low E string, fret 5");
+        if (notes.size() == 1)
+        {
+            check (std::abs (notes[0].start - 2.0) < 1e-9, "first note placed at the cursor");
+            check (std::abs (notes[0].length - 0.5) < 1e-9, "length kept");
+        }
+    }
+
+    // Hammer-on and pull-off (new note-on before the old note-off, same string).
+    {
+        Rec t;
+        t.on (0.0, 2, 62);
+        t.bend (1.0, 2, 0.05); t.on (1.0, 2, 64); t.off (1.0, 2, 62);
+        t.bend (2.0, 2, -0.03); t.on (2.0, 2, 62); t.off (2.0, 2, 64);
+        t.off (2.5, 2, 62);
+        auto n = t.r.finish (3.0);
+        check (n.size() == 3, "hammer/pull: three notes");
+        if (n.size() == 3)
+        {
+            checkEq (n[1].technique, Technique::HammerOn, "higher legato note = hammer-on");
+            checkEq (n[2].technique, Technique::PullOff, "lower legato note = pull-off");
+            check (n[0].bend.empty() && n[0].slide == SlideType::None, "the new note's bend did not leak into the old note");
+        }
+    }
+
+    // A bend up a whole step, held.
+    {
+        Rec t;
+        t.on (0.0, 1, 66);
+        for (int i = 0; i <= 40; ++i) t.bend (0.02 * i, 1, std::min (2.0, 2.0 * i / 12.0));
+        t.off (1.0, 1, 66);
+        auto n = t.r.finish (1.0);
+        double peak = 0;
+        if (! n.empty()) for (auto& b : n[0].bend) peak = std::max (peak, b.semitones);
+        check (! n.empty() && ! n[0].bend.empty() && std::abs (peak - 2.0) < 0.15, "whole-step bend recorded (peak ~2)");
+        check (! n.empty() && n[0].bend.size() <= 6, "bend curve simplified to a few points");
+    }
+
+    // Vibrato: 5.5 Hz, 0.4 semitones, at 120 bpm (1 beat = 0.5 s).
+    {
+        PhraseRecorder::Settings s; s.bpm = 120.0;
+        Rec t (s);
+        t.on (0.0, 2, 64);
+        for (int i = 0; i <= 200; ++i)
+        {
+            const double beat = 0.01 * i, sec = beat * 0.5;
+            t.bend (beat, 2, 0.4 * std::sin (2.0 * 3.14159265 * 5.5 * sec));
+        }
+        t.off (2.0, 2, 64);
+        auto n = t.r.finish (2.0);
+        check (! n.empty() && n[0].vibrato, "vibrato recognised");
+        if (! n.empty())
+        {
+            check (std::abs (n[0].vibratoRateHz - 5.5) < 1.0, "vibrato speed about 5.5 Hz");
+            check (n[0].vibratoDepth > 0.2 && n[0].vibratoDepth < 0.6, "vibrato depth about 0.4");
+            check (n[0].bend.empty(), "vibrato is not saved as a bend");
+        }
+    }
+
+    // Slide into the next note: pitch glides +2, then the next note starts there.
+    {
+        Rec t;
+        t.on (0.0, 4, 57);
+        for (int i = 0; i <= 10; ++i) t.bend (0.5 + 0.05 * i, 4, 0.2 * i);
+        t.bend (1.0, 4, 0.02); t.on (1.0, 4, 59); t.off (1.0, 4, 57);
+        t.off (2.0, 4, 59);
+        auto n = t.r.finish (2.0);
+        check (n.size() == 2 && n[0].slide == SlideType::SlideTo && n[0].slideToFret == n[0].fret + 2, "slide into the next note");
+        check (n.size() == 2 && n[1].technique == Technique::Normal, "slide target is not a hammer-on");
+    }
+
+    // Chord: the single note sent first is dropped, the chord is one group.
+    {
+        Rec t;
+        t.on (0.0, 5, 45);
+        t.off (0.12, 5, 45);
+        t.on (0.12, 5, 45); t.on (0.12, 4, 52); t.on (0.12, 3, 57);
+        t.off (1.0, 5, 45); t.off (1.0, 4, 52); t.off (1.0, 3, 57);
+        auto n = t.r.finish (1.0);
+        checkEq ((int) n.size(), 3, "chord: 3 notes, the swapped single note is gone");
+        bool sameGroup = n.size() == 3 && n[0].group >= 0 && n[0].group == n[1].group && n[1].group == n[2].group;
+        check (sameGroup, "chord notes share one group");
+    }
+
+    // Snap to 1/8 and keep the place in the bar when the DAW was playing.
+    {
+        PhraseRecorder::Settings s; s.snapBeats = 0.5; s.startAt = 4.3; s.alignToBars = true;
+        Rec t (s);
+        t.on (9.47, 2, 64); t.off (9.9, 2, 64);   // bar 3 (beats 8..12), 1.47 beats in
+        auto n = t.r.finish (10.0);
+        check (n.size() == 1 && std::abs (n[0].start - 5.5) < 1e-9, "aligned to the bar and snapped: 4 + 1.5 = 5.5");
+    }
+
+    // End to end: guitar audio -> tracker -> recorder. A2 then a hammer-on to B2.
+    {
+        Instrument g;
+        Calibration cal;
+        cal.valid = true; cal.noiseFloor = 0.001f; cal.softPeak = 0.05f; cal.hardPeak = 0.5f;
+        TrackerSettings ts; ts.mode = TrackMode::Mono; ts.monoInput = 0;
+        GuitarTracker tracker;
+        tracker.prepare (kRate, 512, g, cal, ts);
+
+        PhraseRecorder rec;
+        rec.start (g, {});
+        const double samplesPerBeat = kRate * 0.5; // 120 bpm
+
+        auto audio = pluck (0.7, [] (double tm) { return tm < 0.3 ? 110.0 : 123.47; }, 0.5, 0.8);
+        append (audio, silenceOf (0.3));
+        int base = 0;
+        for (size_t pos = 0; pos < audio.size(); pos += 512)
+        {
+            const int n = (int) std::min<size_t> (512, audio.size() - pos);
+            const float* chans[1] = { audio.data() + pos };
+            tracker.process (chans, 1, n,
+                [&] (int off, uint8_t s, uint8_t a, uint8_t b) { rec.add ((base + off) / samplesPerBeat, s, a, b); },
+                [] (const AnalysisFrame&) {});
+            base += n;
+        }
+        auto notes = rec.finish (base / samplesPerBeat);
+        check (notes.size() == 2, "end to end: two notes recorded");
+        if (notes.size() == 2)
+        {
+            check (notes[0].string == 5 && notes[0].fret == 5, "end to end: A2 on the low E string, fret 5");
+            check (notes[1].fret == 7 && notes[1].technique == Technique::HammerOn, "end to end: B2 as a hammer-on at fret 7");
+        }
+    }
+}
+
 int main()
 {
+    testRecorder();
     testSpectrum();
     testFullCalibration();
     testTimbreString();

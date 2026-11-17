@@ -512,8 +512,8 @@ namespace gl
         addAndMakeVisible (warning);
 
         help.setColour (juce::Label::textColourId, theme::textDim);
-        help.setText ("Tracked notes are sent to the MIDI output (one channel per string, like the rest of Guitar Lab), "
-                      "shown in green on the fretboard and piano, and played by the built-in sound if it is on.",
+        help.setText ("Tracked notes go to the MIDI output (one channel per string) and show in green. "
+                      "To write them down as editable tab, use 'Record guitar' in the Play & Write tab.",
                       juce::dontSendNotification);
         addAndMakeVisible (help);
 

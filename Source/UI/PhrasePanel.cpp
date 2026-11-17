@@ -30,10 +30,13 @@ namespace gl
 
             if (! n.bend.empty())
             {
+                // Shown to the nearest half step, like tab. Recorded bends are never exact, so "pre-bend"
+                // and "release" need a clear change (the stored curve keeps the exact values).
                 double peak = 0;
                 for (auto& b : n.bend) peak = std::max (peak, b.semitones);
-                const bool release = n.bend.back().semitones < peak - 0.01;
-                s << (n.bend.front().semitones > 0.01 ? "pb" : "b") << juce::String (peak, peak == std::floor (peak) ? 0 : 1)
+                const double shown = std::max (0.5, std::round (peak * 2.0) / 2.0);
+                const bool release = n.bend.back().semitones < peak - 0.5;
+                s << (n.bend.front().semitones > 0.3 ? "pb" : "b") << juce::String (shown, shown == std::floor (shown) ? 0 : 1)
                   << (release ? "r" : "");
             }
 
@@ -409,6 +412,36 @@ namespace gl
         statusLabel.setColour (juce::Label::textColourId, theme::textDim);
         addAndMakeVisible (statusLabel);
 
+        // --- Record the real guitar ---
+        recordButton.setClickingTogglesState (true);
+        recordButton.setColour (juce::TextButton::buttonOnColourId, theme::bad);
+        recordButton.setTooltip ("Record guitar\n"
+            "Writes what you play on your REAL guitar into this phrase, as tab you can edit.\n"
+            "Needs guitar tracking: turn it on (and calibrate) in the Guitar -> MIDI tab first.\n"
+            "Recording starts with your first note and goes to the yellow cursor. If the DAW (or Play) is running, "
+            "notes keep their place in the bar instead.\n"
+            "Press again to stop. The notes then appear in the tab view: hammer-ons (h), pull-offs (p), bends, slides, "
+            "vibrato (~) and chords are recognised. One Undo removes the whole take.");
+        recordButton.onClick = [this]
+        {
+            if (recordButton.getToggleState()) startRecording();
+            else                               stopRecording();
+        };
+        addAndMakeVisible (recordButton);
+
+        snapLabel.setText ("Snap", juce::dontSendNotification);
+        snapLabel.setJustificationType (juce::Justification::centredRight);
+        snapLabel.setTooltip ("Snap recorded notes\n"
+            "Moves the start and end of each recorded note to the nearest grid line.\n"
+            "Off = keep your exact timing (good for feel). 1/16 or 1/8 = tidy tab that lines up with the beat.\n"
+            "Bends, slides and vibrato are not changed by snapping.");
+        addAndMakeVisible (snapLabel);
+        for (auto [name, id] : { std::pair { "Off", 1 }, { "1/16", 2 }, { "1/8", 3 }, { "1/8T", 4 }, { "1/4", 5 } })
+            snapBox.addItem (name, id);
+        snapBox.setSelectedId (2, juce::dontSendNotification);
+        snapBox.setTooltip (snapLabel.getTooltip());
+        addAndMakeVisible (snapBox);
+
         // --- Tab view ---
         tab.onSelect = [this] (int i)
         {
@@ -430,6 +463,98 @@ namespace gl
         addAndMakeVisible (tabViewport);
 
         refresh();
+    }
+
+    PhrasePanel::~PhrasePanel()
+    {
+        proc.recordingGuitar = false;
+    }
+
+    // -----------------------------------------------------------------------
+    // Recording the real guitar
+    // -----------------------------------------------------------------------
+    void PhrasePanel::startRecording()
+    {
+        if ((int) proc.params.getRawParameterValue (ParamIDs::trackMode)->load() == 0)
+        {
+            recordButton.setToggleState (false, juce::dontSendNotification);
+            statusLabel.setText ("Turn on guitar tracking first (Guitar -> MIDI tab).", juce::dontSendNotification);
+            return;
+        }
+
+        static const double snapBeats[] = { 0.0, 0.25, 0.5, 1.0 / 3.0, 1.0 };
+        PhraseRecorder::Settings s;
+        s.firstChannel = proc.midiSettings.firstChannel;
+        s.bendRange    = proc.midiSettings.bendRange;
+        s.bpm          = proc.currentBpm();
+        s.snapBeats    = snapBeats[juce::jlimit (1, 5, snapBox.getSelectedId()) - 1];
+        s.startAt      = tab.cursor;
+        recorder.start (proc.instrument, s);
+
+        // Throw away anything left from before, then start.
+        while (proc.popRecordEvents (recordBuffer.data(), (int) recordBuffer.size()) > 0) {}
+        recordStarted = false;
+        lastRecordBeat = 0.0;
+        proc.recordingGuitar = true;
+        statusLabel.setText ("Recording... play your guitar. Press the red button to stop.", juce::dontSendNotification);
+    }
+
+    void PhrasePanel::drainRecording()
+    {
+        int n = 0;
+        while ((n = proc.popRecordEvents (recordBuffer.data(), (int) recordBuffer.size())) > 0)
+            for (int i = 0; i < n; ++i)
+            {
+                const auto& e = recordBuffer[(size_t) i];
+                if (! recordStarted)
+                {
+                    recordStarted = true;
+                    recorder.setAlignToBars (e.aligned);
+                }
+                recorder.add (e.beat, e.status, e.data1, e.data2);
+                lastRecordBeat = std::max (lastRecordBeat, e.beat);
+            }
+    }
+
+    void PhrasePanel::stopRecording()
+    {
+        proc.recordingGuitar = false;
+        drainRecording();
+        recordButton.setToggleState (false, juce::dontSendNotification);
+
+        auto notes = recorder.finish (lastRecordBeat + 0.25); // notes still ringing end here
+        if (notes.empty())
+        {
+            statusLabel.setText ("Nothing was recorded. Is the guitar tracked (green notes on the fretboard)?", juce::dontSendNotification);
+            return;
+        }
+
+        pushUndo();
+
+        // Chord groups from the recorder start at 0: move them after the phrase's own groups.
+        int groups = 0;
+        double end = 0.0;
+        for (auto& n : notes)
+        {
+            if (n.group >= 0) { groups = std::max (groups, n.group + 1); n.group += proc.phrase.nextGroup; }
+            end = std::max (end, n.start + n.length);
+            proc.phrase.notes.push_back (n);
+        }
+        proc.phrase.nextGroup += groups;
+
+        // Make the phrase long enough (1, 2, 4, 8, 16 or 32 bars, as in the Length box).
+        for (int bars : { 1, 2, 4, 8, 16, 32 })
+            if (bars * 4.0 >= end || bars == 32)
+            {
+                proc.phrase.lengthBeats = std::max (proc.phrase.lengthBeats, bars * 4.0);
+                break;
+            }
+
+        tab.cursor = std::min (end, proc.phrase.lengthBeats - stepBeats());
+        tab.selected = -1;
+        commit();
+        statusLabel.setText ("Recorded " + juce::String ((int) notes.size()) + " notes. Undo removes the whole take.",
+                             juce::dontSendNotification);
     }
 
     // -----------------------------------------------------------------------
@@ -655,6 +780,13 @@ namespace gl
     void PhrasePanel::timerTick()
     {
         playButton.setButtonText (proc.isInternalPlaying() ? "Stop" : "Play");
+
+        if (proc.recordingGuitar.load())
+        {
+            drainRecording();
+            statusLabel.setText (recordStarted ? "Recording... " + juce::String (recorder.notesSoFar()) + " notes so far."
+                                               : "Recording... waiting for your first note.", juce::dontSendNotification);
+        }
         if (proc.playheadBeat.load() >= 0)
             tab.repaint();
     }
@@ -733,6 +865,8 @@ namespace gl
         put (a, barsLabel, 52);        put (a, barsBox, 90);
         put (a, techniqueLabel, 72);   put (a, techniqueBox, 150);
         put (a, velLabel, 60);         put (a, velocity, 170);
+        put (a, recordButton, 120);
+        put (a, snapLabel, 40);        put (a, snapBox, 80);
 
         auto b = row();
         put (b, bendLabel, 40);        put (b, bendBox, 150);   put (b, bendAmountBox, 110);

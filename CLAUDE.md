@@ -19,6 +19,8 @@ Three tools share one 24-fret neck (6, 7 or 8 strings, any tuning) and a piano v
    fret on every string (real pitch, level and tone colour per spot; hex: string-to-string leak) and, in mono
    mode, ~8 chords (chroma fingerprints). Mono mode then guesses the string from tone colour and recognises
    taught chords.
+   **Record guitar** (Play & Write tab) writes the tracked notes into the phrase as editable tab:
+   hammer-ons, pull-offs, bends, slides, vibrato and chords are recognised (`PhraseRecorder`).
 
 ## Build
 
@@ -47,7 +49,7 @@ Inno Setup is not installed on the dev machine; CI installs it. Do not install i
 | Folder | What | Depends on JUCE? |
 |---|---|---|
 | `Source/Theory/` | Notes, instrument + tunings, chords + Roman numerals, reharm engine, voicing search, trainer logic | **No** |
-| `Source/Midi/` | `Phrase` (the note/technique model) and `MidiRenderer` (phrase -> MIDI events) | **No** |
+| `Source/Midi/` | `Phrase` (the note/technique model), `MidiRenderer` (phrase -> MIDI events), `PhraseRecorder` (tracked MIDI -> phrase notes) | **No** |
 | `Source/Tracking/` | `PitchDetector` (YIN on a downsampled copy), `Spectrum` (FFT, tone colour, chroma), `Calibration` + `CalibrationSession` (wizard logic), `GuitarTracker` (audio -> notes/bends/velocity/chords) | **No** |
 | `Source/Audio/` | `PluckSynth`: small built-in plucked-string sound (one voice per MIDI channel) | Yes |
 | `Source/UI/` | Fretboard, piano, top bar, the four tab panels, theme + tooltip look | Yes |
@@ -92,6 +94,15 @@ Keep `Theory/`, `Midi/` and `Tracking/` free of JUCE, so they stay testable and 
   Keep it that way: an FFT on every hop for 8 strings is too expensive.
 - Mono chords: the single note starts at once (low latency); about 60 ms later, if the chroma matches a
   taught chord, the note is swapped for the whole shape. Do not delay single notes to wait for chords.
+- **Record guitar:** while `proc.recordingGuitar` is true, every tracker MIDI message is stamped with a beat
+  and sent through `recordFifo` to `PhrasePanel`, which feeds `PhraseRecorder`. The clock is chosen once when
+  recording starts: DAW / Play position if running (notes keep their place in the bar), else a free clock at
+  the current tempo. Notes are added on Stop with one undo step; recording starts at the first note.
+- `PhraseRecorder` depends on the tracker's message order: on a legato change the tracker sends
+  *bend (new note) -> note-on (new) -> note-off (old)* at the same time, so a bend with the same beat as a
+  legato note-on belongs to the new note. A short single note that ends exactly where a chord with the same
+  pitch starts is the tracker's chord swap and is dropped. Keep both in sync if the tracker changes.
+- Recorded bends keep their exact curve (so the sound is faithful); the tab text rounds them to half steps.
 - Tracking tests use synthetic decaying sawtooth "plucks" in `Tests/CoreTests.cpp`. Add a test there for any
   change to note start/stop, bend vs. legato decisions, or the calibration steps.
 - **Every control needs a detailed tooltip.** First line = short title (shown bold), then plain-English lines

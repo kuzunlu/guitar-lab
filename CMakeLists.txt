@@ -53,6 +53,7 @@ add_library(GuitarLabCore STATIC
     Source/Theory/Trainer.cpp
     Source/Midi/Phrase.cpp
     Source/Midi/MidiRenderer.cpp
+    Source/Midi/PhraseRecorder.cpp
     Source/Tracking/PitchDetector.cpp
     Source/Tracking/Spectrum.cpp
     Source/Tracking/Calibration.cpp

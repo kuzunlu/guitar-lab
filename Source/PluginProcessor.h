@@ -112,6 +112,17 @@ public:
     int  popFrames (gl::AnalysisFrame* dest, int maxFrames); // message thread: analysis frames for tuner + wizard
     int  numGuitarInputs() const { return getTotalNumInputChannels(); }
 
+    // --- Recording tracked notes into the phrase ---
+    struct RecordEvent
+    {
+        double  beat = 0.0;     // recording clock (DAW / Play position, or a free clock at the current tempo)
+        bool    aligned = false;// true when the clock was the DAW / Play position (keep the place in the bar)
+        uint8_t status = 0, data1 = 0, data2 = 0;
+    };
+    std::atomic<bool> recordingGuitar { false };
+    int    popRecordEvents (RecordEvent* dest, int maxEvents); // message thread
+    double currentBpm() const { return renderBpm(); }
+
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
     void handleAsyncUpdate() override;  // host tempo or a setting changed: re-render / rebuild the tracker
@@ -158,6 +169,13 @@ private:
     int maxBlock = 512;
     juce::AbstractFifo frameFifo { 8192 };
     std::vector<gl::AnalysisFrame> frameStore = std::vector<gl::AnalysisFrame> (8192);
+
+    // Recording (audio thread)
+    juce::AbstractFifo recordFifo { 16384 };
+    std::vector<RecordEvent> recordStore = std::vector<RecordEvent> (16384);
+    bool   wasRecording = false;
+    bool   recordUsesTransport = false;
+    double recordClock = 0.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GuitarLabProcessor)
 };
