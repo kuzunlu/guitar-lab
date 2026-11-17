@@ -37,6 +37,7 @@ namespace gl
                     addAndMakeVisible (l);
                     addAndMakeVisible (s);
                     sliderAttachments.add (new APVTS::SliderAttachment (proc.params, id, s));
+                    s.setNumDecimalPlacesToDisplay (2); // after the attachment, which sets the range
                 };
 
                 auto addToggle = [this] (juce::ToggleButton& b, const juce::String& name, const char* id, const juce::String& tip)
@@ -267,7 +268,10 @@ namespace gl
         addAndMakeVisible (scaleLabel);
         scaleRootBox.addItem ("C", 1);
         for (int pc = 1; pc < 12; ++pc)
-            scaleRootBox.addItem (juce::String (pitchClassName (pc, false)) + " / " + juce::String (pitchClassName (pc, true)), pc + 1);
+        {
+            const juce::String sharp (pitchClassName (pc, false)), flat (pitchClassName (pc, true));
+            scaleRootBox.addItem (sharp == flat ? sharp : sharp + " / " + flat, pc + 1); // "D", but "C# / Db"
+        }
         scaleRootBox.setSelectedId (1, juce::dontSendNotification);
         scaleRootBox.onChange = [this] { if (onChange) onChange(); };
         const juce::String rootTip = "Scale root (key)\nThe note the scale starts on. Root notes are shown in orange on the fretboard and piano.";

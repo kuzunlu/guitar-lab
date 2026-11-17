@@ -97,6 +97,12 @@ namespace gl
                 if (pitchClassOf (s.inst.noteAt (p)) == third) ++thirds;
             score += std::max (0, thirds - 1) * 0.6;
 
+            // The exact same note twice (e.g. open A and A on the E string, 5th fret) adds nothing.
+            const auto notes = v.notes (s.inst);
+            for (size_t i = 1; i < notes.size(); ++i)
+                for (size_t j = 0; j < i; ++j)
+                    if (notes[i] == notes[j]) score += 1.0;
+
             return score;
         }
 

@@ -57,8 +57,8 @@ namespace gl
     // =======================================================================
     // TabView
     // =======================================================================
-    float TabView::beatToX (double beat) const { return kTabLeft + (float) beat * kPxPerBeat; }
-    double TabView::xToBeat (float x) const    { return (x - kTabLeft) / kPxPerBeat; }
+    float TabView::beatToX (double beat) const { return kTabLeft + (float) beat * pxPerBeat; }
+    double TabView::xToBeat (float x) const    { return (x - kTabLeft) / pxPerBeat; }
 
     int TabView::noteAt (juce::Point<float> p) const
     {
@@ -70,7 +70,7 @@ namespace gl
             const auto& n = notes[(size_t) i];
             const float x = beatToX (n.start);
             const float y = kTabTop + rowH * n.string;
-            const float w = std::max (22.0f, (float) n.length * kPxPerBeat);
+            const float w = std::max (22.0f, (float) n.length * pxPerBeat);
             if (juce::Rectangle<float> (x, y, w, rowH).contains (p))
                 return i;
         }
@@ -118,7 +118,7 @@ namespace gl
 
             const float x = beatToX (n.start);
             const float y = kTabTop + rowH * n.string;
-            const float w = (float) n.length * kPxPerBeat;
+            const float w = (float) n.length * pxPerBeat;
 
             g.setColour ((i == selected ? theme::accent : theme::chordTone).withAlpha (0.25f));
             g.fillRoundedRectangle (x, y + rowH * 0.3f, std::max (4.0f, w - 2.0f), rowH * 0.4f, 3.0f);
@@ -640,7 +640,9 @@ namespace gl
         loadingControls = false;
 
         tab.gridStep = stepBeats();
-        tab.setSize ((int) (kTabLeft * 2 + proc.phrase.lengthBeats * kPxPerBeat), juce::jmax (60, tabViewport.getHeight() - 12));
+        // Use the whole width when the phrase is short; scroll when it is long.
+        tab.pxPerBeat = std::max (kPxPerBeat, (tabViewport.getWidth() - kTabLeft * 2) / (float) std::max (1.0, proc.phrase.lengthBeats));
+        tab.setSize ((int) (kTabLeft * 2 + proc.phrase.lengthBeats * tab.pxPerBeat), juce::jmax (60, tabViewport.getHeight() - 12));
         tab.repaint();
 
         statusLabel.setText (juce::String ((int) proc.phrase.notes.size()) + " notes   cursor: bar "

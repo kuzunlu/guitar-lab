@@ -16,6 +16,7 @@ namespace gl
         double cursor = 0.0;
         int    selected = -1;   // index into proc.phrase.notes, -1 = none
         double gridStep = 0.5;
+        float  pxPerBeat = 52.0f;  // set by PhrasePanel to fill the width
 
         std::function<void()> onCursorMoved;
         std::function<void (int)> onSelect;

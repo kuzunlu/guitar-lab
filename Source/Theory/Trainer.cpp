@@ -152,8 +152,8 @@ namespace gl
                 const auto p = pickSpot();
                 q.shown = { p };
                 q.targetPc = pitchClassOf (inst.noteAt (p));
-                q.prompt = "What note is this? (string " + std::to_string (inst.numStrings() - p.string)
-                         + " from the bottom, fret " + std::to_string (p.fret) + ")";
+                q.prompt = "What note is this? (string " + std::to_string (p.string + 1)
+                         + ", fret " + std::to_string (p.fret) + ")";
                 break;
             }
 
