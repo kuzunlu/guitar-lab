@@ -7,6 +7,7 @@
 #include "UI/PianoComponent.h"
 #include "UI/ReharmPanel.h"
 #include "UI/Theme.h"
+#include "UI/TrackerPanel.h"
 #include "UI/TrainerPanel.h"
 
 class GuitarLabEditor : public juce::AudioProcessorEditor,
@@ -20,7 +21,7 @@ public:
     void resized() override;
 
 private:
-    enum Tab { PlayTab = 0, ReharmTab = 1, TrainerTab = 2 };
+    enum Tab { PlayTab = 0, ReharmTab = 1, TrainerTab = 2, TrackerTab = 3 };
 
     // TabbedComponent only tells subclasses when the tab changes.
     struct Tabs : public juce::TabbedComponent
@@ -46,6 +47,7 @@ private:
     gl::PhrasePanel        phrasePanel;
     gl::ReharmPanel        reharmPanel;
     gl::TrainerPanel       trainerPanel;
+    gl::TrackerPanel       trackerPanel;
     Tabs tabs;
 
     std::vector<int> lastTuning;

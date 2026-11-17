@@ -4,15 +4,15 @@
 #include <cmath>
 
 GuitarLabProcessor::GuitarLabProcessor()
-    : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+    : AudioProcessor (BusesProperties().withInput  ("Guitar In", juce::AudioChannelSet::stereo(), true)
+                                       .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       params (*this, nullptr, "Params", createLayout())
 {
     for (auto& f : soundingFret) f = -1;
     for (auto& b : soundingBend) b = 0.0f;
     for (auto& n : externalNotes) n = false;
 
-    for (auto* id : { ParamIDs::bendRange, ParamIDs::firstChannel, ParamIDs::sendMpe, ParamIDs::syncToHost,
-                      ParamIDs::internalBpm, ParamIDs::legatoOverlap, ParamIDs::legatoVelocity })
+    for (auto* id : listenedParams())
         params.addParameterListener (id, this);
 
     phraseChanged();
@@ -20,10 +20,33 @@ GuitarLabProcessor::GuitarLabProcessor()
 
 GuitarLabProcessor::~GuitarLabProcessor()
 {
-    for (auto* id : { ParamIDs::bendRange, ParamIDs::firstChannel, ParamIDs::sendMpe, ParamIDs::syncToHost,
-                      ParamIDs::internalBpm, ParamIDs::legatoOverlap, ParamIDs::legatoVelocity })
+    for (auto* id : listenedParams())
         params.removeParameterListener (id, this);
     cancelPendingUpdate();
+}
+
+const std::vector<const char*>& GuitarLabProcessor::listenedParams()
+{
+    static const std::vector<const char*> ids {
+        ParamIDs::bendRange, ParamIDs::firstChannel, ParamIDs::sendMpe, ParamIDs::syncToHost,
+        ParamIDs::internalBpm, ParamIDs::legatoOverlap, ParamIDs::legatoVelocity,
+        ParamIDs::trackMode, ParamIDs::trackInput, ParamIDs::trackStability,
+        ParamIDs::trackSensitivity, ParamIDs::trackBends };
+    return ids;
+}
+
+void GuitarLabProcessor::parameterChanged (const juce::String& id, float)
+{
+    if (id.startsWith ("track") || id == ParamIDs::bendRange || id == ParamIDs::firstChannel)
+        trackerDirty = true;
+    triggerAsyncUpdate();
+}
+
+void GuitarLabProcessor::handleAsyncUpdate()
+{
+    phraseChanged();
+    if (trackerDirty.exchange (false))
+        rebuildTracker();
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout GuitarLabProcessor::createLayout()
@@ -48,23 +71,89 @@ juce::AudioProcessorValueTreeState::ParameterLayout GuitarLabProcessor::createLa
                     NormalisableRange<float> (0.2f, 1.0f), 0.65f));
     layout.add (std::make_unique<AudioParameterBool>  (ParameterID { ParamIDs::passThrough, 1 },    "MIDI thru", true));
     layout.add (std::make_unique<AudioParameterInt>   (ParameterID { ParamIDs::liveVelocity, 1 },   "Click velocity", 1, 127, 100));
+
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::trackMode, 1 },     "Guitar tracking",
+                    StringArray { "Off", "Normal guitar (mono)", "Hex pickup (one input per string)" }, 0));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::trackInput, 1 },    "Tracking input",
+                    StringArray { "Mix of all inputs", "Input 1", "Input 2" }, 1));
+    layout.add (std::make_unique<AudioParameterInt>    (ParameterID { ParamIDs::trackStability, 1 }, "Tracking safety", 1, 8, 3));
+    layout.add (std::make_unique<AudioParameterFloat>  (ParameterID { ParamIDs::trackSensitivity, 1 }, "Tracking sensitivity",
+                    NormalisableRange<float> (0.25f, 4.0f, 0.01f, 0.5f), 1.0f));
+    layout.add (std::make_unique<AudioParameterBool>   (ParameterID { ParamIDs::trackBends, 1 },    "Track bends", true));
+    layout.add (std::make_unique<AudioParameterBool>   (ParameterID { ParamIDs::trackMonitor, 1 },  "Hear guitar", false));
     return layout;
 }
 
 bool GuitarLabProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
     const auto out = layouts.getMainOutputChannelSet();
-    return out == juce::AudioChannelSet::stereo() || out == juce::AudioChannelSet::mono();
+    if (out != juce::AudioChannelSet::stereo() && out != juce::AudioChannelSet::mono())
+        return false;
+
+    // Guitar input: off, mono, stereo, or up to 8 separate channels (hex pickup, one per string).
+    const auto in = layouts.getMainInputChannelSet();
+    return in.isDisabled() || in.size() <= gl::kMaxStrings;
 }
 
-void GuitarLabProcessor::prepareToPlay (double sampleRate, int)
+void GuitarLabProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     currentSampleRate = sampleRate;
+    maxBlock = std::max (1, samplesPerBlock);
+    inputCopy.setSize (gl::kMaxStrings, maxBlock);
     synth.prepare (sampleRate);
     liveCollector.reset (sampleRate);
     needSetup = true;
     wasPlaying = false;
     for (auto& a : active) a.reset();
+    rebuildTracker();
+}
+
+// ---------------------------------------------------------------------------
+// Tracking
+// ---------------------------------------------------------------------------
+void GuitarLabProcessor::rebuildTracker()
+{
+    syncSettings();
+
+    gl::TrackerSettings ts;
+    ts.mode         = (gl::TrackMode) (int) params.getRawParameterValue (ParamIDs::trackMode)->load();
+    ts.monoInput    = (int) params.getRawParameterValue (ParamIDs::trackInput)->load() - 1; // 0 = mix -> -1
+    ts.stableFrames = (int) params.getRawParameterValue (ParamIDs::trackStability)->load();
+    ts.sensitivity  = params.getRawParameterValue (ParamIDs::trackSensitivity)->load();
+    ts.trackBends   = params.getRawParameterValue (ParamIDs::trackBends)->load() > 0.5f;
+    ts.bendRange    = midiSettings.bendRange;
+    ts.firstChannel = midiSettings.firstChannel;
+    ts.features     = calibrating.load(); // tone colour + chord fingerprints, only needed by the wizard
+
+    // Calibration only fits the tuning it was made for (cents per string); otherwise use defaults.
+    auto cal = calibration;
+    if (cal.valid && cal.tuning != instrument.tuning())
+    {
+        const float noise = cal.noiseFloor, soft = cal.softPeak, hard = cal.hardPeak;
+        cal = gl::Calibration {};
+        cal.valid = true;
+        cal.noiseFloor = noise; cal.softPeak = soft; cal.hardPeak = hard; // loudness still fits
+    }
+
+    auto fresh = std::make_unique<gl::GuitarTracker>();
+    fresh->prepare (currentSampleRate, maxBlock, instrument, cal, ts);
+    trackerTuning = instrument.tuning();
+
+    {
+        const juce::SpinLock::ScopedLockType lock (trackerLock);
+        std::swap (tracker, fresh);
+    }
+    needAllOff = true; // the old tracker may have left notes on
+    // "fresh" now holds the old tracker and is freed here, on this (non-audio) thread.
+}
+
+int GuitarLabProcessor::popFrames (gl::AnalysisFrame* dest, int maxFrames)
+{
+    const auto scope = frameFifo.read (std::min (maxFrames, frameFifo.getNumReady()));
+    int n = 0;
+    for (int i = 0; i < scope.blockSize1; ++i) dest[n++] = frameStore[(size_t) (scope.startIndex1 + i)];
+    for (int i = 0; i < scope.blockSize2; ++i) dest[n++] = frameStore[(size_t) (scope.startIndex2 + i)];
+    return n;
 }
 
 // ---------------------------------------------------------------------------
@@ -113,6 +202,9 @@ void GuitarLabProcessor::phraseChanged()
     // Old vectors are freed here, on the message thread, not on the audio thread.
 
     needSetup = true;
+
+    if (trackerTuning != instrument.tuning())
+        rebuildTracker();
 }
 
 // ---------------------------------------------------------------------------
@@ -242,8 +334,15 @@ void GuitarLabProcessor::emitPhrase (juce::MidiBuffer& out, double ppqStart, dou
 void GuitarLabProcessor::processBlock (juce::AudioBuffer<float>& audio, juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
-    audio.clear();
     const int numSamples = audio.getNumSamples();
+
+    // Keep the guitar input: the buffer is shared with the output and gets cleared next.
+    const int numIn = std::min (getTotalNumInputChannels(), gl::kMaxStrings);
+    const int numCopied = std::min (numSamples, inputCopy.getNumSamples());
+    for (int c = 0; c < numIn; ++c)
+        inputCopy.copyFrom (c, 0, audio, c, 0, numCopied);
+
+    audio.clear();
 
     // --- Where are we in time? ---
     const bool sync = params.getRawParameterValue (ParamIDs::syncToHost)->load() > 0.5f;
@@ -310,6 +409,31 @@ void GuitarLabProcessor::processBlock (juce::AudioBuffer<float>& audio, juce::Mi
     liveCollector.removeNextBlockOfMessages (live, numSamples);
     out.addEvents (live, 0, numSamples, 0);
 
+    // --- Guitar-to-MIDI tracking ---
+    {
+        const juce::SpinLock::ScopedTryLockType trackLock (trackerLock);
+        if (trackLock.isLocked() && tracker != nullptr && tracker->mode() != gl::TrackMode::Off && numIn > 0)
+        {
+            const float* ptrs[gl::kMaxStrings] {};
+            for (int c = 0; c < numIn; ++c)
+                ptrs[c] = inputCopy.getReadPointer (c);
+
+            const bool quiet = calibrating.load(); // the wizard listens, but nothing is sent
+            tracker->process (ptrs, numIn, numCopied,
+                [&] (int offset, uint8_t status, uint8_t d1, uint8_t d2)
+                {
+                    if (! quiet)
+                        out.addEvent (juce::MidiMessage (status, d1, d2), juce::jlimit (0, numSamples - 1, offset));
+                },
+                [this] (const gl::AnalysisFrame& f)
+                {
+                    const auto scope = frameFifo.write (1);
+                    if (scope.blockSize1 > 0)      frameStore[(size_t) scope.startIndex1] = f;
+                    else if (scope.blockSize2 > 0) frameStore[(size_t) scope.startIndex2] = f;
+                });
+        }
+    }
+
     // --- The phrase ---
     if (playing && lock.isLocked())
     {
@@ -338,6 +462,12 @@ void GuitarLabProcessor::processBlock (juce::AudioBuffer<float>& audio, juce::Mi
         synth.render (audio, out);
     }
 
+    // --- Hear the guitar itself (mixed to mono, sent to every output channel) ---
+    if (numIn > 0 && params.getRawParameterValue (ParamIDs::trackMonitor)->load() > 0.5f)
+        for (int ch = 0; ch < getTotalNumOutputChannels(); ++ch)
+            for (int c = 0; c < numIn; ++c)
+                audio.addFrom (ch, 0, inputCopy, c, 0, numCopied, 1.0f / (float) numIn);
+
     midi.swapWith (out);
 }
 
@@ -364,6 +494,7 @@ void GuitarLabProcessor::getStateInformation (juce::MemoryBlock& destData)
     extra.setProperty ("keyswitches", ks.joinIntoString (","), nullptr);
     extra.setProperty ("keyswitchChannel", midiSettings.keyswitchChannel, nullptr);
     extra.setProperty ("palmMuteCC", midiSettings.palmMuteCC, nullptr);
+    extra.setProperty ("calibration", juce::String (calibration.serialise()), nullptr);
 
     state.removeChild (state.getChildWithName ("GuitarLabData"), nullptr);
     state.appendChild (extra, nullptr);
@@ -405,9 +536,11 @@ void GuitarLabProcessor::setStateInformation (const void* data, int sizeInBytes)
             midiSettings.keyswitch[i] = ks[i].getIntValue();
         midiSettings.keyswitchChannel = extra.getProperty ("keyswitchChannel", 0);
         midiSettings.palmMuteCC       = extra.getProperty ("palmMuteCC", -1);
+        calibration.deserialise (extra.getProperty ("calibration").toString().toStdString());
     }
 
     phraseChanged();
+    rebuildTracker();
 
     if (onStateLoaded)
         juce::MessageManager::callAsync ([this] { if (onStateLoaded) onStateLoaded(); });

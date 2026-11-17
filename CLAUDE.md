@@ -11,7 +11,14 @@ Three tools share one 24-fret neck (6, 7 or 8 strings, any tuning) and a piano v
 3. **Trainer** – note-name, find-the-note, arpeggio and interval quizzes, focused on chosen strings
    and frets, weighted toward the player's weak spots, with a heat map.
 
-Planned next: **real-time guitar-to-MIDI tracking** with a calibration stage (asks for the tuning first).
+4. **Guitar -> MIDI** – real-time tracking of a real guitar from the audio input.
+   *Mono* mode (normal guitar, one cable): single notes with bends, slides, vibrato; string/fret is guessed
+   from the hand position; chords are not reliable. *Hex* mode (hexaphonic pickup, one input per string):
+   every string tracked on its own. A calibration wizard asks for the tuning first, then listens to silence,
+   each open string, the 12th fret, and soft/hard picking (Quick). *Full* calibration instead asks for every
+   fret on every string (real pitch, level and tone colour per spot; hex: string-to-string leak) and, in mono
+   mode, ~8 chords (chroma fingerprints). Mono mode then guesses the string from tone colour and recognises
+   taught chords.
 
 ## Build
 
@@ -37,13 +44,14 @@ Outputs:
 |---|---|---|
 | `Source/Theory/` | Notes, instrument + tunings, chords + Roman numerals, reharm engine, voicing search, trainer logic | **No** |
 | `Source/Midi/` | `Phrase` (the note/technique model) and `MidiRenderer` (phrase -> MIDI events) | **No** |
+| `Source/Tracking/` | `PitchDetector` (YIN on a downsampled copy), `Spectrum` (FFT, tone colour, chroma), `Calibration` + `CalibrationSession` (wizard logic), `GuitarTracker` (audio -> notes/bends/velocity/chords) | **No** |
 | `Source/Audio/` | `PluckSynth`: small built-in plucked-string sound (one voice per MIDI channel) | Yes |
 | `Source/UI/` | Fretboard, piano, top bar, the three tab panels, theme + tooltip look | Yes |
 | `Source/PluginProcessor.*` | Parameters, state save/load, playback in sync with the host, live notes | Yes |
 | `Source/PluginEditor.*` | Lays out the window and routes fretboard/piano clicks to the open tab | Yes |
 | `Tests/CoreTests.cpp` | Plain asserts for `Theory/` and `Midi/` (no framework) | No |
 
-Keep `Theory/` and `Midi/` free of JUCE, so they stay testable and could move to another plugin format.
+Keep `Theory/`, `Midi/` and `Tracking/` free of JUCE, so they stay testable and could move to another plugin format.
 
 ## Rules that are easy to break
 
@@ -60,6 +68,25 @@ Keep `Theory/` and `Midi/` free of JUCE, so they stay testable and could move to
   The audio thread only uses `ScopedTryLock` and never allocates or frees the event vectors.
   Live notes from the UI go through `juce::MidiMessageCollector`.
 - After changing anything that affects MIDI output, call `proc.phraseChanged()`.
+- **Tracking:** `GuitarTracker::prepare` allocates, so the tracker is built on the message thread in
+  `proc.rebuildTracker()` and swapped in under `trackerLock` (audio thread: `ScopedTryLock` only).
+  Call `rebuildTracker()` after changing the calibration, the instrument, or any `track*` parameter
+  (parameter changes do it by themselves through `parameterChanged`).
+- The input buffer shares channels with the output, so `processBlock` copies the guitar input to
+  `inputCopy` BEFORE clearing the buffer.
+- Analysis frames go to the UI through `frameFifo` (lock-free). The editor timer must drain it every tick,
+  even when the Guitar -> MIDI tab is hidden.
+- While `proc.calibrating` is true the tracker runs but sends no MIDI. The wizard rebuilds the tracker with an
+  empty calibration first, so in hex mode frame channels are raw input numbers (needed to find the channel map).
+- A calibration only fits the tuning it was made for (`cal.tuning`). With another tuning, `rebuildTracker()`
+  keeps only the loudness values and drops the per-string cents and channel map.
+- Spectrum work (tone colour, chroma) runs on the audio thread only every 4th hop while calibrating
+  (`TrackerSettings::features`), and otherwise once per note start (string guess) or at ~60 ms (chord check).
+  Keep it that way: an FFT on every hop for 8 strings is too expensive.
+- Mono chords: the single note starts at once (low latency); about 60 ms later, if the chroma matches a
+  taught chord, the note is swapped for the whole shape. Do not delay single notes to wait for chords.
+- Tracking tests use synthetic decaying sawtooth "plucks" in `Tests/CoreTests.cpp`. Add a test there for any
+  change to note start/stop, bend vs. legato decisions, or the calibration steps.
 - **Every control needs a detailed tooltip.** First line = short title (shown bold), then plain-English lines
   that explain what it does and when to use it. Components that change by hover (fretboard, piano, tab view,
   chord cards) implement `getTooltip()` to describe what is under the mouse.

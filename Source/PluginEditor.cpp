@@ -8,7 +8,8 @@ GuitarLabEditor::GuitarLabEditor (GuitarLabProcessor& p)
       instrumentBar (p),
       phrasePanel (p, fretboard),
       reharmPanel (p, fretboard, piano),
-      trainerPanel (p)
+      trainerPanel (p),
+      trackerPanel (p)
 {
     setLookAndFeel (&lnf);
     tooltipWindow.setLookAndFeel (&lnf);
@@ -20,6 +21,11 @@ GuitarLabEditor::GuitarLabEditor (GuitarLabProcessor& p)
     tabs.addTab ("Play & Write",  theme::panel, &phrasePanel,  false);
     tabs.addTab ("Reharm Lab",    theme::panel, &reharmPanel,  false);
     tabs.addTab ("Trainer",       theme::panel, &trainerPanel, false);
+    tabs.addTab ("Guitar -> MIDI", theme::panel, &trackerPanel, false);
+    tabs.getTabbedButtonBar().getTabButton (TrackerTab)->setTooltip (
+        "Guitar -> MIDI\nPlay your real guitar and turn it into MIDI in real time: notes, bends, slides, vibrato and velocity. "
+        "Works with a normal guitar (single notes) or a hex pickup (one input per string, chords too). "
+        "Calibrate it to your guitar first.");
     tabs.getTabbedButtonBar().getTabButton (PlayTab)->setTooltip (
         "Play & Write\nPlay the fretboard live (bends and slides with the mouse) and write MIDI phrases with "
         "hammer-ons, pull-offs, bends, slides, vibrato, harmonics and strummed chords.");
@@ -89,6 +95,7 @@ GuitarLabEditor::GuitarLabEditor (GuitarLabProcessor& p)
     reharmPanel.onDisplayChanged  = [this] { updateDisplay(); };
     reharmPanel.onPhraseReplaced  = [this] { phrasePanel.refresh(); tabs.setCurrentTabIndex (PlayTab); };
     trainerPanel.onDisplayChanged = [this] { updateDisplay(); };
+    trackerPanel.onDisplayChanged = [this] { if (currentTab() == TrackerTab) updateDisplay(); };
 
     proc.onStateLoaded = [this] { reloadAll(); };
 
@@ -130,6 +137,7 @@ void GuitarLabEditor::instrumentChanged()
         trainerPanel.refresh();
         reharmPanel.refresh();
         phrasePanel.refresh();
+        trackerPanel.refresh();
         resized(); // the fretboard height depends on the string count
     }
     updateDisplay();
@@ -175,6 +183,17 @@ void GuitarLabEditor::updateDisplay()
             break;
         }
 
+        case TrackerTab:
+            // Tracked notes show as green "sounding" dots; the scale overlay helps to see what you play.
+            // While calibrating, the fret or chord shape to play next is shown in yellow.
+            marks = trackerPanel.marks();
+            boardLayer = scale;
+            pianoLayer = scale;
+            fretboard.setHeatMap ({});
+            fretboard.setFretRangeHighlight (-1, -1);
+            fretboard.setShowAllNoteNames (instrumentBar.showAllNames());
+            break;
+
         default: break;
     }
 
@@ -215,6 +234,7 @@ void GuitarLabEditor::timerCallback()
     fretboard.setSounding (frets, bends);
     piano.setSounding (sounding);
     phrasePanel.timerTick();
+    trackerPanel.timerTick(); // always: the frame queue must be emptied even when the tab is hidden
 }
 
 void GuitarLabEditor::paint (juce::Graphics& g)

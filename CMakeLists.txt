@@ -28,6 +28,10 @@ add_library(GuitarLabCore STATIC
     Source/Theory/Trainer.cpp
     Source/Midi/Phrase.cpp
     Source/Midi/MidiRenderer.cpp
+    Source/Tracking/PitchDetector.cpp
+    Source/Tracking/Spectrum.cpp
+    Source/Tracking/Calibration.cpp
+    Source/Tracking/GuitarTracker.cpp
 )
 target_include_directories(GuitarLabCore PUBLIC Source)
 
@@ -59,6 +63,7 @@ target_sources(GuitarLab PRIVATE
     Source/UI/ReharmPanel.cpp
     Source/UI/TrainerPanel.cpp
     Source/UI/PhrasePanel.cpp
+    Source/UI/TrackerPanel.cpp
 )
 
 target_compile_definitions(GuitarLab PUBLIC

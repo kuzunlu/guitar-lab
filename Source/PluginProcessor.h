@@ -4,6 +4,7 @@
 #include "Midi/MidiRenderer.h"
 #include "Theory/Instrument.h"
 #include "Theory/Trainer.h"
+#include "Tracking/GuitarTracker.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_devices/juce_audio_devices.h>
@@ -28,6 +29,13 @@ namespace ParamIDs
     inline constexpr auto legatoVelocity = "legatoVelocity";
     inline constexpr auto passThrough    = "passThrough";
     inline constexpr auto liveVelocity   = "liveVelocity";
+
+    inline constexpr auto trackMode        = "trackMode";
+    inline constexpr auto trackInput       = "trackInput";
+    inline constexpr auto trackStability   = "trackStability";
+    inline constexpr auto trackSensitivity = "trackSensitivity";
+    inline constexpr auto trackBends       = "trackBends";
+    inline constexpr auto trackMonitor     = "trackMonitor";
 }
 
 class GuitarLabProcessor : public juce::AudioProcessor,
@@ -97,10 +105,20 @@ public:
 
     std::function<void()> onStateLoaded; // the editor refreshes itself when a project is loaded
 
+    // --- Guitar-to-MIDI tracking ---
+    gl::Calibration calibration;         // message thread; copied into the tracker by rebuildTracker()
+    std::atomic<bool> calibrating { false }; // true while the wizard runs: tracker sends no MIDI
+    void rebuildTracker();               // call after changing calibration, instrument or tracking settings
+    int  popFrames (gl::AnalysisFrame* dest, int maxFrames); // message thread: analysis frames for tuner + wizard
+    int  numGuitarInputs() const { return getTotalNumInputChannels(); }
+
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
-    void handleAsyncUpdate() override { phraseChanged(); } // host tempo or a MIDI setting changed: re-render
-    void parameterChanged (const juce::String&, float) override { triggerAsyncUpdate(); }
+    void handleAsyncUpdate() override;  // host tempo or a setting changed: re-render / rebuild the tracker
+    void parameterChanged (const juce::String& id, float) override;
+    std::atomic<bool> trackerDirty { false };
+    static const std::vector<const char*>& listenedParams();
+    std::vector<int> trackerTuning;     // tuning the tracker was built for
     double renderBpm() const;
 
     void emitPhrase (juce::MidiBuffer& out, double ppqStart, double ppqEnd, double samplesPerBeat, int numSamples);
@@ -132,6 +150,14 @@ private:
     double currentSampleRate = 44100.0;
 
     std::array<std::bitset<128>, 16> active; // notes we have sent note-on for (audio thread only)
+
+    // Tracking (swapped under trackerLock; old trackers are freed on the message thread)
+    juce::SpinLock trackerLock;
+    std::unique_ptr<gl::GuitarTracker> tracker;
+    juce::AudioBuffer<float> inputCopy;
+    int maxBlock = 512;
+    juce::AbstractFifo frameFifo { 8192 };
+    std::vector<gl::AnalysisFrame> frameStore = std::vector<gl::AnalysisFrame> (8192);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GuitarLabProcessor)
 };
