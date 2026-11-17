@@ -5,6 +5,31 @@ project(GuitarLab VERSION 0.1.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# The version comes from the newest git tag (like v0.1.0). A release build shows the tag,
+# other builds show how far past it they are, like v0.1.0-2-gabc1234.
+set(GUITAR_LAB_VERSION_TEXT "dev")
+set(GUITAR_LAB_VERSION_NUMBER "0.0.0")
+find_package(Git QUIET)
+
+if(GIT_FOUND)
+    execute_process(COMMAND "${GIT_EXECUTABLE}" describe --tags --match "v[0-9]*"
+                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+                    OUTPUT_VARIABLE gitDescribe
+                    OUTPUT_STRIP_TRAILING_WHITESPACE
+                    ERROR_QUIET
+                    RESULT_VARIABLE gitDescribeResult)
+
+    if(gitDescribeResult EQUAL 0 AND gitDescribe MATCHES "^v([0-9]+[.][0-9]+[.][0-9]+)")
+        set(GUITAR_LAB_VERSION_TEXT "${gitDescribe}")
+        set(GUITAR_LAB_VERSION_NUMBER "${CMAKE_MATCH_1}")
+    endif()
+endif()
+
+message(STATUS "Guitar Lab version: ${GUITAR_LAB_VERSION_TEXT}")
+
+# Put the Visual C++ runtime inside the plugin, so it works on PCs without the Visual C++ Redistributable.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
 include(FetchContent)
 
 # JUCE is pinned to an exact release tag.
@@ -39,6 +64,7 @@ target_include_directories(GuitarLabCore PUBLIC Source)
 # The plugin: VST3 + Standalone app.
 # ---------------------------------------------------------------------------
 juce_add_plugin(GuitarLab
+    VERSION                    ${GUITAR_LAB_VERSION_NUMBER}
     COMPANY_NAME               "kuzunlu"
     PLUGIN_MANUFACTURER_CODE   Kuzu
     PLUGIN_CODE                GtLb
@@ -71,6 +97,7 @@ target_compile_definitions(GuitarLab PUBLIC
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0
     JUCE_DISPLAY_SPLASH_SCREEN=0
+    "GUITAR_LAB_VERSION=\"${GUITAR_LAB_VERSION_TEXT}\""
 )
 
 target_link_libraries(GuitarLab
@@ -90,5 +117,7 @@ target_link_libraries(GuitarLab
 # ---------------------------------------------------------------------------
 enable_testing()
 add_executable(GuitarLabTests Tests/CoreTests.cpp)
+# Always build/GuitarLabTests.exe ($<1:...> stops multi-config generators from adding a Release folder).
+set_target_properties(GuitarLabTests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "$<1:${CMAKE_BINARY_DIR}>")
 target_link_libraries(GuitarLabTests PRIVATE GuitarLabCore)
 add_test(NAME CoreTests COMMAND GuitarLabTests)

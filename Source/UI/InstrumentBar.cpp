@@ -307,6 +307,16 @@ namespace gl
         midiButton.onClick = [this] { showMidiSettings(); };
         addAndMakeVisible (midiButton);
 
+       #ifndef GUITAR_LAB_VERSION
+        #define GUITAR_LAB_VERSION "dev"
+       #endif
+        versionLabel.setText (GUITAR_LAB_VERSION, juce::dontSendNotification);
+        versionLabel.setJustificationType (juce::Justification::centredRight);
+        versionLabel.setColour (juce::Label::textColourId, theme::textDim);
+        versionLabel.setTooltip ("Guitar Lab version\nThe version of this plugin, from the release it was built from. "
+                                 "A longer text like v0.1.0-3-gabc1234 means a test build, 3 changes after v0.1.0.");
+        addAndMakeVisible (versionLabel);
+
         refresh();
     }
 
@@ -448,6 +458,7 @@ namespace gl
             }
 
         midiButton.setBounds (bottom.removeFromRight (130));
+        versionLabel.setBounds (bottom.removeFromRight (150));
         scaleLabel.setBounds (bottom.removeFromLeft (76));
         scaleRootBox.setBounds (bottom.removeFromLeft (90));
         bottom.removeFromLeft (4);

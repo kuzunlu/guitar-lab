@@ -51,6 +51,7 @@ namespace gl
         juce::ToggleButton namesToggle { "All note names" }, flatsToggle { "Flats" };
 
         juce::TextButton midiButton { "MIDI / Sound..." };
+        juce::Label versionLabel;
 
         bool updating = false;
 

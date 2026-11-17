@@ -26,17 +26,21 @@ Tools on the dev machine: Visual Studio Build Tools 2026 (MSVC 14.51), Windows S
 CMake 4.3.1 (bundled with Build Tools). JUCE is fetched by CMake, pinned to tag `9.0.5`.
 
 ```powershell
-$cmake = "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
-& $cmake -S . -B build -G "Visual Studio 18 2026" -A x64     # first time: downloads JUCE (~2 min)
-& $cmake --build build --config Release --parallel
-.\build\Release\GuitarLabTests.exe                            # must print "All tests passed."
+cmd /c build.bat      # finds Visual Studio, CMake + Ninja in Release, then runs the tests
 ```
 
-Outputs:
+`build.bat` (used locally and by CI) always reconfigures, so the version from `git describe` stays
+current. The first run downloads JUCE (~2 min). It ends with "All tests passed." and these outputs:
 - `build/GuitarLab_artefacts/Release/VST3/Guitar Lab.vst3`
 - `build/GuitarLab_artefacts/Release/Standalone/Guitar Lab.exe`
+- `build/GuitarLabTests.exe`
 
+The `build` folder must be a **Ninja** build. If it was made with another generator, delete it first
+(CMake cannot switch generators in one folder).
+
+The C++ runtime is static (`/MT`), so the plugin needs only Windows' own DLLs (no VC++ redistributable).
 `COPY_PLUGIN_AFTER_BUILD` is off on purpose. Do not install the plugin into system folders without asking.
+Inno Setup is not installed on the dev machine; CI installs it. Do not install it without asking.
 
 ## Code layout
 
@@ -46,10 +50,13 @@ Outputs:
 | `Source/Midi/` | `Phrase` (the note/technique model) and `MidiRenderer` (phrase -> MIDI events) | **No** |
 | `Source/Tracking/` | `PitchDetector` (YIN on a downsampled copy), `Spectrum` (FFT, tone colour, chroma), `Calibration` + `CalibrationSession` (wizard logic), `GuitarTracker` (audio -> notes/bends/velocity/chords) | **No** |
 | `Source/Audio/` | `PluckSynth`: small built-in plucked-string sound (one voice per MIDI channel) | Yes |
-| `Source/UI/` | Fretboard, piano, top bar, the three tab panels, theme + tooltip look | Yes |
+| `Source/UI/` | Fretboard, piano, top bar, the four tab panels, theme + tooltip look | Yes |
 | `Source/PluginProcessor.*` | Parameters, state save/load, playback in sync with the host, live notes | Yes |
 | `Source/PluginEditor.*` | Lays out the window and routes fretboard/piano clicks to the open tab | Yes |
-| `Tests/CoreTests.cpp` | Plain asserts for `Theory/` and `Midi/` (no framework) | No |
+| `Tests/CoreTests.cpp` | Plain asserts for `Theory/`, `Midi/` and `Tracking/` (no framework) | No |
+| `installer/GuitarLab.iss` | Inno Setup 6 installer script | - |
+| `build.bat` | Local + CI build (CMake + Ninja with Visual Studio's toolchain), then runs the tests | - |
+| `.github/workflows/build.yml` | CI on every push; a `v*` tag also publishes a GitHub Release | - |
 
 Keep `Theory/`, `Midi/` and `Tracking/` free of JUCE, so they stay testable and could move to another plugin format.
 
@@ -93,6 +100,28 @@ Keep `Theory/`, `Midi/` and `Tracking/` free of JUCE, so they stay testable and 
 - In the Trainer tab, never show the scale layer or note names on the neck: it would give answers away.
 - Plugin state (tuning, phrase, trainer stats, reharm input, keyswitches) is saved as plain text inside the
   `GuitarLabData` child of the parameter tree. Keep old fields readable when adding new ones.
+
+## Versioning, CI and releases
+
+- Version = `git describe --tags --match "v[0-9]*"`, e.g. `v0.1.0` or `v0.1.0-2-gabc1234` (no tag: `dev`).
+  CMake passes the number to `juce_add_plugin VERSION` and the full text as `GUITAR_LAB_VERSION`,
+  shown at the right of the top bar. CI checks out with `fetch-depth: 0` so it has the tags.
+- CI (`windows-latest`): `build.bat` (build + tests) -> upload **Guitar-Lab-VST3** and
+  **Guitar-Lab-Standalone** -> build the installer with Inno Setup (installed via choco if missing)
+  -> upload **Guitar-Lab-Installer**. Actions are pinned by commit SHA with a version comment
+  (same pins as the owner's stream-bridge repo).
+- Release: `git tag vX.Y.Z && git push origin vX.Y.Z` -> CI publishes a GitHub Release with
+  `Guitar-Lab-vX.Y.Z.zip` (VST3 folder + standalone exe) and `Guitar-Lab-Setup-X.Y.Z.exe`.
+  **Never push a tag unless the owner asks.**
+- This machine cannot reach the GitHub API (no `gh`, `api.github.com` blocked), so CI results must be
+  checked by the owner on the Actions page.
+
+## Installer (installer/GuitarLab.iss)
+
+Admin install. VST3 -> `{commoncf64}\VST3\Guitar Lab.vst3`; standalone app -> `{autopf}\Guitar Lab\`
+with a Start menu shortcut (desktop shortcut optional, unchecked). The finish page can start the app
+(unchecked by default). The uninstaller removes both. Keep `AppId` (`EC7CA7EC-AD0F-4735-B147-70B70766C9E9`)
+unchanged forever: Windows uses it to recognise updates. Unsigned, so Windows SmartScreen will warn.
 
 ## Working with the owner
 
