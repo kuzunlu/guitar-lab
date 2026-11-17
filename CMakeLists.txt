@@ -1,0 +1,89 @@
+cmake_minimum_required(VERSION 3.25)
+
+project(GuitarLab VERSION 0.1.0 LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+include(FetchContent)
+
+# JUCE is pinned to an exact release tag.
+FetchContent_Declare(
+    JUCE
+    GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
+    GIT_TAG        9.0.5
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(JUCE)
+
+# ---------------------------------------------------------------------------
+# Music logic library (plain C++, no JUCE) so it can be unit tested alone.
+# ---------------------------------------------------------------------------
+add_library(GuitarLabCore STATIC
+    Source/Theory/Note.cpp
+    Source/Theory/Instrument.cpp
+    Source/Theory/Chord.cpp
+    Source/Theory/Reharm.cpp
+    Source/Theory/Voicing.cpp
+    Source/Theory/Trainer.cpp
+    Source/Midi/Phrase.cpp
+    Source/Midi/MidiRenderer.cpp
+)
+target_include_directories(GuitarLabCore PUBLIC Source)
+
+# ---------------------------------------------------------------------------
+# The plugin: VST3 + Standalone app.
+# ---------------------------------------------------------------------------
+juce_add_plugin(GuitarLab
+    COMPANY_NAME               "kuzunlu"
+    PLUGIN_MANUFACTURER_CODE   Kuzu
+    PLUGIN_CODE                GtLb
+    PRODUCT_NAME               "Guitar Lab"
+    FORMATS                    VST3 Standalone
+    IS_SYNTH                   TRUE
+    NEEDS_MIDI_INPUT           TRUE
+    NEEDS_MIDI_OUTPUT          TRUE
+    IS_MIDI_EFFECT             FALSE
+    EDITOR_WANTS_KEYBOARD_FOCUS TRUE
+    COPY_PLUGIN_AFTER_BUILD    FALSE
+    VST3_CATEGORIES            Instrument Generator
+)
+
+target_sources(GuitarLab PRIVATE
+    Source/PluginProcessor.cpp
+    Source/PluginEditor.cpp
+    Source/Audio/PluckSynth.cpp
+    Source/UI/FretboardComponent.cpp
+    Source/UI/PianoComponent.cpp
+    Source/UI/InstrumentBar.cpp
+    Source/UI/ReharmPanel.cpp
+    Source/UI/TrainerPanel.cpp
+    Source/UI/PhrasePanel.cpp
+)
+
+target_compile_definitions(GuitarLab PUBLIC
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_VST3_CAN_REPLACE_VST2=0
+    JUCE_DISPLAY_SPLASH_SCREEN=0
+)
+
+target_link_libraries(GuitarLab
+    PRIVATE
+        GuitarLabCore
+        juce::juce_audio_utils
+        juce::juce_audio_processors
+        juce::juce_gui_extra
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_lto_flags
+        juce::juce_recommended_warning_flags
+)
+
+# ---------------------------------------------------------------------------
+# Tests for the music logic (no JUCE needed).
+# ---------------------------------------------------------------------------
+enable_testing()
+add_executable(GuitarLabTests Tests/CoreTests.cpp)
+target_link_libraries(GuitarLabTests PRIVATE GuitarLabCore)
+add_test(NAME CoreTests COMMAND GuitarLabTests)
