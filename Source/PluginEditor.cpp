@@ -109,6 +109,11 @@ GuitarLabEditor::GuitarLabEditor (GuitarLabProcessor& p)
     trainerPanel.onDisplayChanged = [this] { updateDisplay(); };
     trackerPanel.onDisplayChanged = [this] { if (currentTab() == TrackerTab) updateDisplay(); };
     shapesPanel.onDisplayChanged  = [this] { if (currentTab() == ShapesTab) updateDisplay(); };
+    phrasePanel.onSendChords      = [this] (const juce::String& chords)
+    {
+        reharmPanel.setProgression (chords);
+        tabs.setCurrentTabIndex (ReharmTab);
+    };
     trackerPanel.onTuningWanted   = [this] (const std::vector<MidiNote>& t) { instrumentBar.applyTuning (t); };
 
     proc.onStateLoaded = [this] { reloadAll(); };
@@ -265,6 +270,8 @@ void GuitarLabEditor::timerCallback()
         lastChordNotes = sounding;
         updateChordName (sounding);
     }
+    if (currentTab() == TrainerTab)
+        trainerPanel.heard (sounding); // "Ear: play it back" listens to the guitar
     phrasePanel.timerTick();
     trackerPanel.timerTick(); // always: the frame queue must be emptied even when the tab is hidden
 }

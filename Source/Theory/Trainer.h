@@ -28,8 +28,16 @@ namespace gl
         NameTheNote,   // a dot is shown, you type/click its name
         FindTheNote,   // a name is shown, you click every place it lives in the fret range
         ArpeggioTones, // a chord is shown, you click its chord tones in the fret range
-        IntervalName   // two dots are shown, you name the interval
+        IntervalName,  // two dots are shown, you name the interval
+        EarInterval,   // two notes are played (low, then high), you name the interval - nothing is shown
+        EarChord,      // a chord is strummed, you name its type - nothing is shown
+        EarPlayBack    // a note is played, you play it back (real guitar, fretboard or piano)
     };
+
+    // The chord types asked in "Ear: chord type", in button order.
+    const std::vector<ChordQuality>& earChordQualities();
+    std::string chordQualityName (ChordQuality q); // "major", "minor 7th", ...
+    inline bool isEarQuiz (QuizMode m) { return m == QuizMode::EarInterval || m == QuizMode::EarChord || m == QuizMode::EarPlayBack; }
 
     struct QuizFocus
     {
@@ -45,7 +53,8 @@ namespace gl
         std::vector<FretPos> shown;  // dots to show
         PitchClass targetPc = 0;     // the answer for name/find questions
         Chord chord;                 // for arpeggio questions
-        int interval = 0;            // for interval questions (0..11)
+        int interval = 0;            // for interval questions (0..11; ear: 1..12, 12 = octave)
+        bool playTogether = true;    // ear: strum the shown spots together (chord) or one after another (interval)
         std::string prompt;
     };
 
@@ -73,6 +82,7 @@ namespace gl
         // Name / interval answers. Returns true when correct, and records it.
         bool answerPitchClass (const Question& q, PitchClass answer, double seconds);
         bool answerInterval (const Question& q, int semitones, double seconds);
+        bool answerChordQuality (const Question& q, ChordQuality answer, double seconds);
 
         // Find / arpeggio answers: the spots the player clicked. All correct spots must be found, no wrong ones.
         bool answerPositions (const Question& q, const std::vector<FretPos>& clicked, double seconds,

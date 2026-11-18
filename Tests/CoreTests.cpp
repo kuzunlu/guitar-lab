@@ -2,6 +2,8 @@
 
 #include "Midi/MidiRenderer.h"
 #include "Midi/PhraseRecorder.h"
+#include "Midi/TabExport.h"
+#include "Midi/ChordTimeline.h"
 #include "Theory/ChordFinder.h"
 #include "Theory/Reharm.h"
 #include "Theory/Trainer.h"
@@ -10,6 +12,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <set>
 #include <string>
 
 namespace
@@ -130,6 +133,84 @@ static void testChordNames()
         if (notes.size() >= 2 && (m.empty() || m[0].name.empty())) ++unnamed;
     }
     checkEq (unnamed, 0, "chord name: all 4095 note sets get a name");
+}
+
+static void testTabExport()
+{
+    Instrument g;
+    Phrase p;
+    p.lengthBeats = 8.0;
+    auto note = [&] (int s, int f, double start, Technique t = Technique::Normal)
+    {
+        NoteEvent n;
+        n.string = s; n.fret = f; n.start = start; n.length = 0.5; n.technique = t;
+        p.notes.push_back (n);
+        return &p.notes.back();
+    };
+    note (5, 0, 0.0);                                   // low E open
+    note (3, 5, 1.0);
+    note (3, 7, 1.5, Technique::HammerOn);
+    auto* b = note (2, 7, 2.0);
+    b->bend = makeBend (BendPreset::BendAndRelease, 2.0);
+    note (0, 12, 4.0, Technique::NaturalHarmonic);
+    p.sort();
+
+    TabExportInfo info;
+    info.title = "Test (riff)";
+    const auto text = phraseToTextTab (p, g, info);
+    check (text.find ("e|") != std::string::npos && text.find ("E|0") != std::string::npos, "text tab: string names, open low E at the start");
+    check (text.find ("h7") != std::string::npos && text.find ("7b2r") != std::string::npos && text.find ("<12>") != std::string::npos,
+           "text tab: hammer-on, bend + release and harmonic symbols");
+    check (text.find ("Tuning (low to high): E2 A2 D3 G3 B3 E4") != std::string::npos, "text tab: tuning line");
+
+    const auto pdf = phraseToPdf (p, g, info);
+    check (pdf.rfind ("%PDF-1.4", 0) == 0 && pdf.find ("%%EOF") != std::string::npos && pdf.find ("xref") != std::string::npos,
+           "pdf: header, cross-reference table and end marker");
+    check (pdf.find ("(Test \\(riff\\)) Tj") != std::string::npos, "pdf: title written, brackets escaped");
+    check (pdf.find ("(7b2r) Tj") != std::string::npos, "pdf: tab symbols written");
+    {
+        // The cross-reference offsets must point at the objects.
+        const auto xref = pdf.find ("xref\n0 ");
+        const auto firstEntry = pdf.find ("0000000000 65535 f \n", xref) + 20;
+        const size_t obj1 = (size_t) std::stoul (pdf.substr (firstEntry, 10));
+        check (pdf.compare (obj1, 8, "1 0 obj\n") == 0, "pdf: object offsets are right");
+    }
+
+    const auto xml = phraseToMusicXml (p, g, info);
+    check (xml.find ("<sign>TAB</sign>") != std::string::npos && xml.find ("<staff-lines>6</staff-lines>") != std::string::npos,
+           "musicxml: tab staff with 6 lines");
+    check (xml.find ("<string>6</string><fret>0</fret>") != std::string::npos, "musicxml: low E open as string 6, fret 0");
+    check (xml.find ("<hammer-on type=\"start\">H</hammer-on>") != std::string::npos
+           && xml.find ("<hammer-on type=\"stop\"/>") != std::string::npos, "musicxml: hammer-on from fret 5 to 7");
+    check (xml.find ("<bend-alter>2.0</bend-alter><release/>") != std::string::npos, "musicxml: bend with release");
+    check (xml.find ("<harmonic><natural/></harmonic>") != std::string::npos, "musicxml: natural harmonic");
+    {
+        // Every measure adds up to 4 beats (48 divisions).
+        size_t pos = 0;
+        int measures = 0, wrong = 0;
+        while ((pos = xml.find ("<measure number=", pos)) != std::string::npos)
+        {
+            const auto end = xml.find ("</measure>", pos);
+            const auto body = xml.substr (pos, end - pos);
+            int total = 0;
+            size_t q = 0;
+            while ((q = body.find ("<note>", q)) != std::string::npos)
+            {
+                const auto noteEnd = body.find ("</note>", q);
+                const auto n = body.substr (q, noteEnd - q);
+                if (n.find ("<chord/>") == std::string::npos)
+                {
+                    const auto d = n.find ("<duration>") + 10;
+                    total += std::stoi (n.substr (d, n.find ("</duration>") - d));
+                }
+                q = noteEnd;
+            }
+            if (total != 48) ++wrong;
+            ++measures;
+            pos = end;
+        }
+        check (measures == 2 && wrong == 0, "musicxml: 2 measures, each exactly 4 beats long");
+    }
 }
 
 static void testChordSymbols()
@@ -342,6 +423,188 @@ static void testVoicings()
     Key c { 0, false };
     auto led = voiceLead (parseProgression ("ii7 V7 Imaj7", c), g, opt);
     checkEq ((int) led.size(), 3, "voice leading returns one voicing per chord");
+}
+
+static void testGuitarPro3()
+{
+    Instrument g;
+    Phrase p;
+    p.lengthBeats = 8.0;
+    auto add = [&] (int s, int f, double start, double len, Technique t = Technique::Normal)
+    {
+        NoteEvent n; n.string = s; n.fret = f; n.start = start; n.length = len; n.technique = t;
+        p.notes.push_back (n);
+    };
+    add (5, 0, 0.0, 0.5);
+    add (3, 5, 0.5, 0.5);
+    add (3, 7, 1.0, 0.5, Technique::HammerOn);
+    add (2, 7, 2.0, 2.0);
+    p.notes.back().bend = makeBend (BendPreset::Bend, 2.0);
+    add (1, 5, 4.0, 1.0); add (0, 5, 4.0, 1.0);             // a two-note chord
+    add (4, 3, 5.0 + 1.0 / 3.0, 1.0 / 3.0);                 // a triplet note
+    p.sort();
+
+    const auto f = phraseToGuitarPro3 (p, g, {});
+
+    // A small reader, the way Guitar Pro reads the file.
+    size_t at = 0;
+    bool ok = true;
+    auto u8 = [&] { if (at >= f.size()) { ok = false; return 0; } return (int) (unsigned char) f[at++]; };
+    auto i8 = [&] { return (int) (signed char) u8(); };
+    auto i32 = [&] { int v = 0; for (int k = 0; k < 4; ++k) v |= u8() << (8 * k); return v; };
+    auto skip = [&] (size_t n) { at += n; if (at > f.size()) ok = false; };
+
+    const int vlen = u8();
+    check (vlen == 24 && f.compare (1, 24, "FICHIER GUITAR PRO v3.00") == 0, "gp3: version string");
+    at = 31;
+    for (int k = 0; k < 8; ++k) { const int len = i32(); skip ((size_t) len); }   // info strings
+    const int notice = i32();
+    check (notice == 0, "gp3: no notice lines");
+    u8(); const int tempo = i32(); i32();
+    checkEq (tempo, 120, "gp3: tempo");
+    skip (64 * 12);
+    const int measures = i32(), tracks = i32();
+    check (measures == 2 && tracks == 1, "gp3: 2 measures, 1 track");
+    for (int m = 0; m < measures; ++m) { const int fl = u8(); if (fl & 1) i8(); if (fl & 2) i8(); }
+    u8(); skip (41); const int strings = i32();
+    checkEq (strings, 6, "gp3: 6 strings");
+    std::vector<int> tuning;
+    for (int k = 0; k < 7; ++k) tuning.push_back (i32());
+    check (tuning[0] == 64 && tuning[5] == 40 && tuning[6] == 0, "gp3: tuning, highest string first");
+    i32(); i32(); i32(); const int frets = i32(); i32(); skip (4);
+    checkEq (frets, 24, "gp3: 24 frets");
+
+    int hammers = 0, bends = 0, chordBeats = 0, wrongBars = 0;
+    for (int m = 0; m < measures && ok; ++m)
+    {
+        const int beats = i32();
+        double length = 0.0;
+        for (int b = 0; b < beats && ok; ++b)
+        {
+            const int fl = u8();
+            if (fl & 0x40) u8();
+            const int code = i8();
+            double beatsLong = 4.0 / std::pow (2.0, code + 2);   // -2 = whole (4 beats) ... 2 = 16th
+            if (fl & 0x01) beatsLong *= 1.5;
+            if (fl & 0x20) { const int t = i32(); beatsLong *= 2.0 / t; }
+            if (fl & 0x08) u8();
+            length += beatsLong;
+            const int sf = u8();
+            int count = 0;
+            for (int s = 1; s <= 7; ++s)
+                if (sf & (1 << (7 - s)))
+                {
+                    ++count;
+                    const int nf = u8();
+                    if (nf & 0x20) u8();
+                    if (nf & 0x20) i8();
+                    if (nf & 0x08)
+                    {
+                        const int ef = u8();
+                        if (ef & 0x02) ++hammers;
+                        if (ef & 0x01)
+                        {
+                            ++bends;
+                            i8(); i32();
+                            const int points = i32();
+                            for (int q = 0; q < points; ++q) { i32(); i32(); u8(); }
+                        }
+                    }
+                }
+            if (count == 2) ++chordBeats;
+        }
+        if (std::abs (length - 4.0) > 1e-6) ++wrongBars;
+    }
+    const int end = i32();
+    check (ok && end == 0 && at == f.size(), "gp3: the whole file reads back to its exact end");
+    checkEq (wrongBars, 0, "gp3: every bar is exactly 4 beats");
+    check (hammers == 1 && bends >= 1 && chordBeats >= 1, "gp3: hammer-on, bend and the two-note chord are there");
+}
+
+static void testChordTimeline()
+{
+    Instrument g;
+    Phrase p;
+    p.lengthBeats = 16.0;
+    auto strum = [&] (const char* shape, double beat)
+    {
+        Voicing v { std::vector<int> (6, kMuted) };
+        for (int i = 0; i < 6; ++i) v.frets[(size_t) (5 - i)] = shape[i] == 'x' ? kMuted : shape[i] - '0';
+        p.addChord (v, beat, 4.0, 90, true, 15.0, 120.0);
+    };
+    strum ("x02210", 0.0);   // Am
+    strum ("xx3211", 4.0);   // F
+    strum ("x32010", 8.0);   // C
+    // Bar 4: G as an arpeggio, one note per 8th, letting ring
+    const int g6[] = { 3, 2, 0, 0, 0, 3 };
+    for (int i = 0; i < 6; ++i)
+    {
+        NoteEvent n;
+        n.string = 5 - i; n.fret = g6[i]; n.start = 12.0 + i * 0.5; n.length = 0.5; n.letRing = true;
+        p.notes.push_back (n);
+    }
+    p.sort();
+
+    const auto spans = chordTimeline (p, g);
+    std::string names;
+    for (const auto& s : spans) names += s.name + " ";
+    checkEq (names, std::string ("Am F C G "), "chord timeline: strummed chords and an arpeggio (got " + names + ")");
+    check (spans.size() == 4 && spans[1].start == 4.0 && spans[3].end == 16.0, "chord timeline: chords start and end on their bars");
+    checkEq (chordsForReharm (spans), std::string ("Am F C G"), "chord timeline: line for the Reharm Lab");
+
+    // A single-note melody has no chords.
+    Phrase melody;
+    for (int i = 0; i < 8; ++i) { NoteEvent n; n.string = 1; n.fret = i % 3 * 2; n.start = i * 0.5; n.length = 0.5; melody.notes.push_back (n); }
+    check (chordTimeline (melody, g).empty(), "chord timeline: a melody gives no chords");
+
+    // Exports carry the chord names.
+    TabExportInfo info;
+    const auto text = phraseToTextTab (p, g, info);
+    check (text.find ("Am") != std::string::npos && text.find ("\n  1") != std::string::npos, "text tab: chord names line");
+    const auto xml = phraseToMusicXml (p, g, info);
+    check (xml.find ("<root-step>A</root-step></root><kind text=\"m\">minor</kind>") != std::string::npos, "musicxml: Am chord symbol");
+    check (phraseToPdf (p, g, info).find ("(Am) Tj") != std::string::npos, "pdf: chord names");
+}
+
+static void testEarTraining()
+{
+    Trainer t (11);
+    Instrument g;
+    t.setInstrument (g);
+    QuizFocus f;
+    f.strings.assign (6, true);
+    f.minFret = 0;
+    f.maxFret = 12;
+    t.setFocus (f);
+
+    for (int i = 0; i < 30; ++i)
+    {
+        const auto q = t.next (QuizMode::EarInterval);
+        const int d = q.shown.size() == 2 ? g.noteAt (q.shown[1]) - g.noteAt (q.shown[0]) : -1;
+        check (d >= 1 && d <= 12 && d == q.interval && ! q.playTogether, "ear interval: two notes, low then high, up to an octave");
+        check (t.answerInterval (q, q.interval % 12, 1.0), "ear interval: the right answer counts (octave = button 0)");
+    }
+
+    int seen = 0;
+    for (int i = 0; i < 40; ++i)
+    {
+        const auto q = t.next (QuizMode::EarChord);
+        std::set<int> heard, wanted;
+        for (auto p : q.shown) heard.insert (pitchClassOf (g.noteAt (p)));
+        for (auto pc : q.chord.pitchClasses()) wanted.insert (pc);
+        bool inside = true;
+        for (int pc : heard) inside = inside && wanted.count (pc) > 0;
+        check (q.shown.size() >= 3 && inside && q.playTogether, "ear chord: a real shape, only chord notes, strummed");
+        check (pitchClassOf (g.noteAt (q.shown.back())) == q.chord.root || q.shown.size() < 3, "ear chord: the lowest note is the root");
+        check (t.answerChordQuality (q, q.chord.quality, 1.0), "ear chord: the right type counts");
+        check (! t.answerChordQuality (q, q.chord.quality == ChordQuality::Major ? ChordQuality::Minor : ChordQuality::Major, 1.0),
+               "ear chord: a wrong type does not count");
+        seen += (int) heard.size();
+    }
+
+    const auto q = t.next (QuizMode::EarPlayBack);
+    check (q.shown.size() == 1 && t.answerPitchClass (q, q.targetPc, 1.0), "ear play-back: the played note name is the answer");
+    check (isEarQuiz (QuizMode::EarChord) && ! isEarQuiz (QuizMode::NameTheNote), "ear quizzes are marked");
 }
 
 static void testTrainer()
@@ -1320,6 +1583,10 @@ int main()
 {
     testChordNames();
     testChordSymbols();
+    testTabExport();
+    testEarTraining();
+    testChordTimeline();
+    testGuitarPro3();
     testPolyTracking();
     testRecorder();
     testSpectrum();

@@ -53,7 +53,7 @@ namespace gl
         juce::ComboBox  scaleRootBox, scaleTypeBox;
         juce::ToggleButton namesToggle { "All note names" }, flatsToggle { "Flats" };
 
-        juce::TextButton midiButton { "MIDI / Sound..." };
+        juce::TextButton midiButton { "MIDI / Sound..." }, manualButton { "Manual" };
         juce::Label versionLabel;
 
         bool updating = false;

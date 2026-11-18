@@ -55,6 +55,8 @@ add_library(GuitarLabCore STATIC
     Source/Midi/Phrase.cpp
     Source/Midi/MidiRenderer.cpp
     Source/Midi/PhraseRecorder.cpp
+    Source/Midi/TabExport.cpp
+    Source/Midi/ChordTimeline.cpp
     Source/Tracking/PitchDetector.cpp
     Source/Tracking/Spectrum.cpp
     Source/Tracking/Calibration.cpp
@@ -94,6 +96,7 @@ target_sources(GuitarLab PRIVATE
     Source/UI/PhrasePanel.cpp
     Source/UI/TrackerPanel.cpp
     Source/UI/ShapesPanel.cpp
+    Source/UI/IntonationView.cpp
 )
 
 target_compile_definitions(GuitarLab PUBLIC
@@ -125,3 +128,27 @@ add_executable(GuitarLabTests Tests/CoreTests.cpp)
 set_target_properties(GuitarLabTests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "$<1:${CMAKE_BINARY_DIR}>")
 target_link_libraries(GuitarLabTests PRIVATE GuitarLabCore)
 add_test(NAME CoreTests COMMAND GuitarLabTests)
+
+# ---------------------------------------------------------------------------
+# Pictures for the user manual (docs/manual/img). Off by default: tools\make-manual-images.bat turns it on.
+# ---------------------------------------------------------------------------
+option(GUITAR_LAB_SCREENSHOTS "Build the tool that makes the manual's pictures" OFF)
+if(GUITAR_LAB_SCREENSHOTS)
+    juce_add_console_app(GuitarLabScreenshots PRODUCT_NAME "GuitarLabScreenshots")
+    get_target_property(GUITAR_LAB_UI_SOURCES GuitarLab SOURCES)
+    target_sources(GuitarLabScreenshots PRIVATE tools/screenshots/main.cpp ${GUITAR_LAB_UI_SOURCES})
+    target_include_directories(GuitarLabScreenshots PRIVATE Source)
+    target_compile_definitions(GuitarLabScreenshots PRIVATE
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_MODAL_LOOPS_PERMITTED=1
+        "GUITAR_LAB_VERSION=\"${GUITAR_LAB_VERSION_TEXT}\""
+    )
+    target_link_libraries(GuitarLabScreenshots PRIVATE
+        GuitarLabCore
+        juce::juce_audio_utils
+        juce::juce_audio_processors
+        juce::juce_gui_extra
+        juce::juce_recommended_config_flags
+    )
+endif()

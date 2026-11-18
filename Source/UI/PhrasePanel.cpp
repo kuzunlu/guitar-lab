@@ -1,6 +1,7 @@
 #include "UI/PhrasePanel.h"
 
 #include <cmath>
+#include <map>
 
 namespace gl
 {
@@ -8,51 +9,8 @@ namespace gl
     {
         constexpr float kPxPerBeat = 52.0f;
         constexpr float kTabLeft   = 6.0f;
-        constexpr float kTabTop    = 16.0f;
-
-        // Short tab text for a note: "h7", "PM5", "<12>", "7b2", "5/9", "7~" ...
-        juce::String tabText (const NoteEvent& n)
-        {
-            juce::String s;
-            switch (n.technique)
-            {
-                case Technique::HammerOn:        s << "h"; break;
-                case Technique::PullOff:         s << "p"; break;
-                case Technique::Tap:             s << "t"; break;
-                case Technique::PalmMute:        s << "PM"; break;
-                case Technique::PinchHarmonic:   s << "PH"; break;
-                default: break;
-            }
-
-            if (n.technique == Technique::DeadNote)             s << "x";
-            else if (n.technique == Technique::NaturalHarmonic) s << "<" << n.fret << ">";
-            else                                                s << n.fret;
-
-            if (! n.bend.empty())
-            {
-                // Shown to the nearest half step, like tab. Recorded bends are never exact, so "pre-bend"
-                // and "release" need a clear change (the stored curve keeps the exact values).
-                double peak = 0;
-                for (auto& b : n.bend) peak = std::max (peak, b.semitones);
-                const double shown = std::max (0.5, std::round (peak * 2.0) / 2.0);
-                const bool release = n.bend.back().semitones < peak - 0.5;
-                s << (n.bend.front().semitones > 0.3 ? "pb" : "b") << juce::String (shown, shown == std::floor (shown) ? 0 : 1)
-                  << (release ? "r" : "");
-            }
-
-            switch (n.slide)
-            {
-                case SlideType::SlideTo:      s << (n.slideToFret >= n.fret ? "/" : "\\") << n.slideToFret; break;
-                case SlideType::SlideInBelow: s = "/" + s; break;
-                case SlideType::SlideInAbove: s = "\\" + s; break;
-                case SlideType::SlideOutDown: s << "\\"; break;
-                case SlideType::SlideOutUp:   s << "/"; break;
-                case SlideType::None: break;
-            }
-
-            if (n.vibrato) s << "~";
-            return s;
-        }
+        constexpr float kRulerH    = 16.0f;   // bar numbers (drag here to loop a section)
+        constexpr float kTabTop    = 34.0f;   // ruler + the chord names row
 
         const double kStepBeats[] = { 0.25, 0.5, 1.0 / 3.0, 1.0, 2.0, 4.0 };
     }
@@ -87,22 +45,53 @@ namespace gl
         const int strings = proc.instrument.numStrings();
         const float rowH = (getHeight() - kTabTop) / (float) strings;
         const double length = proc.phrase.lengthBeats;
+        const auto clip = g.getClipBounds();
+        const double fromBeat = std::max (0.0, xToBeat ((float) clip.getX()) - 4.0);
+        const double toBeat = std::min (length, xToBeat ((float) clip.getRight()) + 4.0);
 
-        // Grid
-        for (double b = 0; b <= length + 1e-9; b += gridStep)
+        // Loop section: shaded, with a gold strip in the ruler
+        const double ls = proc.loopStart.load(), le = proc.loopEnd.load();
+        if (le > ls + 1e-6)
+        {
+            g.setColour (theme::accent.withAlpha (0.07f));
+            g.fillRect (beatToX (ls), kTabTop, beatToX (le) - beatToX (ls), (float) getHeight() - kTabTop);
+            g.setColour (theme::accent.withAlpha (0.45f));
+            g.fillRect (beatToX (ls), 0.0f, beatToX (le) - beatToX (ls), kRulerH);
+        }
+
+        // Grid: fewer lines when zoomed out
+        double step = gridStep;
+        if (step * pxPerBeat < 5.0f) step = 1.0;
+        if (step * pxPerBeat < 5.0f) step = 4.0;
+        const int labelEvery = std::max (1, (int) std::ceil (44.0 / (4.0 * pxPerBeat)));
+        for (double b = std::floor (fromBeat / step) * step; b <= toBeat + 1e-9; b += step)
         {
             const bool bar = std::fmod (b, 4.0) < 1e-6;
             const bool beat = std::fmod (b, 1.0) < 1e-6;
             g.setColour (bar ? theme::textDim.withAlpha (0.7f) : theme::textDim.withAlpha (beat ? 0.25f : 0.1f));
             g.drawVerticalLine ((int) beatToX (b), kTabTop, (float) getHeight());
 
-            if (bar && b < length)
+            const int barNo = (int) std::lround (b / 4.0);
+            if (bar && b < length && barNo % labelEvery == 0)
             {
                 g.setColour (theme::textDim);
                 g.setFont (juce::FontOptions (11.0f));
-                g.drawText ("Bar " + juce::String ((int) (b / 4) + 1), juce::Rectangle<float> (beatToX (b) + 3, 0, 60, kTabTop),
-                            juce::Justification::centredLeft);
+                g.drawText ((labelEvery == 1 ? "Bar " : "") + juce::String (barNo + 1),
+                            juce::Rectangle<float> (beatToX (b) + 3, 0, 60, kRulerH), juce::Justification::centredLeft);
             }
+        }
+
+        // Chord names (chord timeline)
+        g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+        for (const auto& c : chords)
+        {
+            if (c.end < fromBeat || c.start > toBeat) continue;
+            const float x0 = beatToX (c.start), x1 = beatToX (c.end);
+            g.setColour (theme::accent.withAlpha (0.18f));
+            g.fillRoundedRectangle (x0 + 1.0f, kRulerH + 1.0f, std::max (2.0f, x1 - x0 - 2.0f), kTabTop - kRulerH - 3.0f, 3.0f);
+            g.setColour (theme::accent);
+            g.drawText (juce::String (c.name), juce::Rectangle<float> (x0 + 4.0f, kRulerH, std::max (20.0f, x1 - x0 - 4.0f), kTabTop - kRulerH - 1.0f),
+                        juce::Justification::centredLeft, true);
         }
 
         // String lines
@@ -112,29 +101,42 @@ namespace gl
             g.drawHorizontalLine ((int) (kTabTop + rowH * (s + 0.5f)), beatToX (0), beatToX (length));
         }
 
-        // Notes
+        // Notes (zoomed far out: bars only, no text)
+        const bool showText = pxPerBeat >= 14.0f;
         const auto& notes = proc.phrase.notes;
         for (int i = 0; i < (int) notes.size(); ++i)
         {
             const auto& n = notes[(size_t) i];
-            if (n.string >= strings) continue;
+            if (n.string >= strings || n.start + n.length < fromBeat || n.start > toBeat) continue;
 
             const float x = beatToX (n.start);
             const float y = kTabTop + rowH * n.string;
             const float w = (float) n.length * pxPerBeat;
+            const bool marked = i == selected || isSelected (i);
 
-            g.setColour ((i == selected ? theme::accent : theme::chordTone).withAlpha (0.25f));
-            g.fillRoundedRectangle (x, y + rowH * 0.3f, std::max (4.0f, w - 2.0f), rowH * 0.4f, 3.0f);
+            g.setColour ((marked ? theme::accent : theme::chordTone).withAlpha (marked ? 0.45f : 0.25f));
+            g.fillRoundedRectangle (x, y + rowH * 0.3f, std::max (3.0f, w - 2.0f), rowH * 0.4f, 3.0f);
+            if (! showText) continue;
 
-            const auto text = tabText (n);
+            const auto text = juce::String (noteTabText (n));
             const juce::FontOptions font (juce::jmin (14.0f, rowH * 0.8f), juce::Font::bold);
             const float tw = juce::GlyphArrangement::getStringWidth (font, text) + 6.0f;
 
             g.setColour (theme::panel);
             g.fillRect (x, y + 2, tw, rowH - 4);
-            g.setColour (i == selected ? theme::accent : theme::text);
+            g.setColour (marked ? theme::accent : theme::text);
             g.setFont (font);
             g.drawText (text, juce::Rectangle<float> (x, y, tw, rowH), juce::Justification::centred, false);
+        }
+
+        // Box selection
+        if (boxSelecting)
+        {
+            const auto box = juce::Rectangle<float> (boxStart, boxEnd);
+            g.setColour (theme::accent.withAlpha (0.12f));
+            g.fillRect (box);
+            g.setColour (theme::accent);
+            g.drawRect (box, 1.0f);
         }
 
         // Cursor and playhead
@@ -151,8 +153,18 @@ namespace gl
 
     void TabView::mouseDown (const juce::MouseEvent& e)
     {
-        const int hit = noteAt (e.position);
+        grabKeyboardFocus();
+        dragged = false;
 
+        // The ruler (bar numbers): drag to mark a section to loop.
+        if (e.position.y < kRulerH && ! e.mods.isPopupMenu())
+        {
+            loopDragging = true;
+            loopAnchor = snap (xToBeat (e.position.x));
+            return;
+        }
+
+        const int hit = noteAt (e.position);
         if (e.mods.isPopupMenu())
         {
             if (hit >= 0 && onDelete) onDelete (hit);
@@ -161,23 +173,121 @@ namespace gl
 
         if (hit >= 0)
         {
-            selected = hit;
-            if (onSelect) onSelect (hit);
+            if (e.mods.isCommandDown() || e.mods.isCtrlDown())
+            {
+                // Ctrl + click: add to / take out of the selection
+                if (isSelected (hit)) selection.erase (std::remove (selection.begin(), selection.end(), hit), selection.end());
+                else                  selection.push_back (hit);
+                selected = isSelected (hit) ? hit : (selection.empty() ? -1 : selection.back());
+            }
+            else
+            {
+                if (! isSelected (hit)) selection = { hit };
+                selected = hit;
+            }
+            if (onSelect) onSelect (selected);
+            if (onSelectionChanged) onSelectionChanged();
         }
         else
         {
-            selected = -1;
-            if (onSelect) onSelect (-1);
-            const double beat = std::round (xToBeat (e.position.x) / gridStep) * gridStep;
-            cursor = juce::jlimit (0.0, std::max (0.0, proc.phrase.lengthBeats - gridStep), beat);
-            if (onCursorMoved) onCursorMoved();
+            // Empty place: a click moves the cursor, a drag selects with a box.
+            boxStart = boxEnd = e.position;
+            boxSelecting = true;
         }
         repaint();
+    }
+
+    void TabView::mouseDrag (const juce::MouseEvent& e)
+    {
+        if (e.getDistanceFromDragStart() > 3) dragged = true;
+        if (loopDragging)
+        {
+            if (! dragged) return;
+            const double at = snap (xToBeat (e.position.x));
+            proc.loopStart = std::min (loopAnchor, at);
+            proc.loopEnd = std::max (std::min (loopAnchor, at) + gridStep, std::max (loopAnchor, at));
+            if (onLoopChanged) onLoopChanged();
+            repaint();
+        }
+        else if (boxSelecting)
+        {
+            boxEnd = e.position;
+            repaint();
+        }
+    }
+
+    void TabView::mouseUp (const juce::MouseEvent& e)
+    {
+        if (loopDragging)
+        {
+            loopDragging = false;
+            if (! dragged)
+            {
+                // A click on the ruler (no drag) ends the loop.
+                proc.loopStart = 0.0;
+                proc.loopEnd = 0.0;
+                if (onLoopChanged) onLoopChanged();
+            }
+            repaint();
+            return;
+        }
+        if (! boxSelecting) return;
+        boxSelecting = false;
+
+        if (! dragged)
+        {
+            selection.clear();
+            selected = -1;
+            if (onSelect) onSelect (-1);
+            if (onSelectionChanged) onSelectionChanged();
+            cursor = juce::jlimit (0.0, std::max (0.0, proc.phrase.lengthBeats - gridStep), snap (xToBeat (e.position.x)));
+            if (onCursorMoved) onCursorMoved();
+            repaint();
+            return;
+        }
+
+        // Every note touched by the box
+        const auto box = juce::Rectangle<float> (boxStart, boxEnd);
+        const float rowH = (getHeight() - kTabTop) / (float) proc.instrument.numStrings();
+        if (! (e.mods.isCommandDown() || e.mods.isCtrlDown())) selection.clear();
+        for (int i = 0; i < (int) proc.phrase.notes.size(); ++i)
+        {
+            const auto& n = proc.phrase.notes[(size_t) i];
+            const juce::Rectangle<float> r (beatToX (n.start), kTabTop + rowH * n.string, std::max (8.0f, (float) n.length * pxPerBeat), rowH);
+            if (r.intersects (box) && ! isSelected (i)) selection.push_back (i);
+        }
+        selected = selection.empty() ? -1 : selection.front();
+        if (onSelect) onSelect (selected);
+        if (onSelectionChanged) onSelectionChanged();
+        repaint();
+    }
+
+    void TabView::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w)
+    {
+        // Ctrl + wheel = zoom; otherwise let the viewport scroll.
+        if ((e.mods.isCommandDown() || e.mods.isCtrlDown()) && onZoom)
+            onZoom (w.deltaY > 0 ? 1.25f : 0.8f);
+        else
+            Component::mouseWheelMove (e, w);
     }
 
     juce::String TabView::getTooltip()
     {
         const auto mouse = getMouseXYRelative().toFloat();
+        if (mouse.y >= kRulerH && mouse.y < kTabTop)
+        {
+            const double beat = xToBeat (mouse.x);
+            for (const auto& c : chords)
+                if (beat >= c.start && beat < c.end)
+                    return "Chord: " + juce::String (c.name) + "\n" + juce::String (c.meaning)
+                         + "\n\nThe chord names are found from the notes (strummed chords, and arpeggios over 3+ strings). "
+                           "'To Reharm Lab' sends them there, to try other chords.";
+            return "Chords\nThe chords of the phrase, found from its notes. Single-note melodies have no chord name.";
+        }
+        if (mouse.y < kRulerH)
+            return "Ruler\nDrag here to mark a section (gold). With 'Loop section' on, Play repeats only that section, "
+                   "so you can practise one part again and again. Click the ruler once to end the loop.";
+
         const int hit = noteAt (mouse);
         if (hit >= 0)
         {
@@ -186,13 +296,18 @@ namespace gl
                  + " (" + juce::String (midiNoteName (soundingNote (n, proc.instrument))) + ")\n"
                  + "Starts at beat " + juce::String (n.start + 1.0, 2) + ", length " + juce::String (n.length, 2) + " beats\n"
                  + "Technique: " + juce::String (techniqueName (n.technique)) + "   Velocity: " + juce::String (n.velocity) + "\n"
-                 + "Click to select it (then change the controls above to edit it). Right-click to delete it.";
+                 + "Click to select it (then change the controls above to edit it). Ctrl + click adds it to the selection. "
+                   "Right-click to delete it.";
         }
 
         return "Phrase (tab view)\n"
                "Each row is a string, highest string on top, exactly like guitar tab. Time goes to the right.\n"
-               "Yellow line = write cursor (new notes go here). Green line = playback position.\n"
-               "Click an empty place to move the cursor. Click a note to select and edit it. Right-click a note to delete it.\n"
+               "Yellow line = write cursor (new notes go here). Green line = playback position. Gold = loop section.\n"
+               "Click an empty place to move the cursor. Click a note to select and edit it; Ctrl + click to select more; "
+               "drag on an empty place to select every note in a box. Right-click a note to delete it.\n"
+               "Keys: Delete = delete, Ctrl+C / Ctrl+X / Ctrl+V = copy / cut / paste (at the cursor), Ctrl+A = select all, "
+               "Left / Right = move earlier / later by one step, Up / Down = one half step higher / lower, "
+               "Shift + Up / Down = same pitch on the next string, Ctrl+Z = undo. Ctrl + mouse wheel = zoom.\n"
                "Symbols: h = hammer-on, p = pull-off, t = tap, PM = palm mute, x = dead note, <12> = natural harmonic, "
                "PH = pinch harmonic, b2 = bend 2 semitones, pb = pre-bend, r = release, / and \\ = slides, ~ = vibrato.";
     }
@@ -376,15 +491,8 @@ namespace gl
         chordButton.onClick = [this] { addChordFromBuilder(); };
         addAndMakeVisible (chordButton);
 
-        deleteButton.setTooltip ("Delete note\nRemoves the selected note (you can also right-click a note in the tab view).");
-        deleteButton.onClick = [this]
-        {
-            if (tab.selected < 0 || tab.selected >= (int) proc.phrase.notes.size()) return;
-            pushUndo();
-            proc.phrase.notes.erase (proc.phrase.notes.begin() + tab.selected);
-            tab.selected = -1;
-            commit();
-        };
+        deleteButton.setTooltip ("Delete\nRemoves the selected notes (also: the Delete key, or right-click a note in the tab view).");
+        deleteButton.onClick = [this] { deleteSelection(); };
         addAndMakeVisible (deleteButton);
 
         undoButton.setTooltip ("Undo\nGoes back one change in the phrase (up to 100 steps).");
@@ -400,9 +508,15 @@ namespace gl
         playButton.onClick = [this] { proc.setInternalPlaying (! proc.isInternalPlaying()); };
         addAndMakeVisible (playButton);
 
-        exportButton.setTooltip ("Export MIDI file\nSaves the phrase as a standard .mid file (one track, 960 ticks per beat), "
-                                 "with every pitch bend, slide, vibrato and keyswitch, and the MPE / bend range setup at the start.");
-        exportButton.onClick = [this] { exportMidi(); };
+        exportButton.setTooltip ("Export\nSaves the phrase as a file:\n"
+                                 "  - MIDI (.mid): every pitch bend, slide, vibrato and keyswitch, for your DAW.\n"
+                                 "  - Text tab (.txt): classic e|--3--5--| tab to paste in a message, forum or notes.\n"
+                                 "  - PDF: a printable tab page, with title, tempo, tuning, bar numbers and all symbols.\n"
+                                 "  - MusicXML: opens in MuseScore, Guitar Pro, Sibelius and Finale, as tab (and notes).\n"
+                                 "  - Guitar Pro 3 (.gp3): opens directly in Guitar Pro (3 to 8), TuxGuitar and Songsterr. Up to 7 strings; "
+                                 "GP3 has no palm mute. New: if a file does not open, use MusicXML and tell us.\n"
+                                 "Tip: record your guitar, fix the tab by hand, then export.");
+        exportButton.onClick = [this] { showExportMenu(); };
         addAndMakeVisible (exportButton);
 
         dragArea.setTooltip ("Drag MIDI to DAW\nPress here and drag onto a track in your DAW. The phrase is dropped in as a MIDI clip, "
@@ -410,6 +524,17 @@ namespace gl
                              "set to one channel per string.");
         dragArea.makeFile = [this] { return writeTempMidi(); };
         addAndMakeVisible (dragArea);
+
+        toReharmButton.setTooltip ("To Reharm Lab\nSends the chords of the phrase (the gold names under the bar numbers) to the Reharm Lab "
+                                   "as a progression, one chord per bar, and opens it - to try substitutions and other voicings.\n"
+                                   "Tip: record yourself strumming a song, then press this.");
+        toReharmButton.onClick = [this]
+        {
+            const auto text = juce::String (chordsForReharm (tab.chords));
+            if (text.isEmpty()) { statusLabel.setText ("No chords found in the phrase yet.", juce::dontSendNotification); return; }
+            if (onSendChords) onSendChords (text);
+        };
+        addAndMakeVisible (toReharmButton);
 
         statusLabel.setColour (juce::Label::textColourId, theme::textDim);
         addAndMakeVisible (statusLabel);
@@ -427,7 +552,14 @@ namespace gl
         recordButton.onClick = [this]
         {
             if (recordButton.getToggleState()) startRecording();
-            else                               stopRecording();
+            else if (proc.isCountingIn())
+            {
+                // Stopped during the count-in: nothing was recorded yet.
+                proc.cancelCountIn();
+                recordButton.setToggleState (false, juce::dontSendNotification);
+                statusLabel.setText ("Count-in stopped.", juce::dontSendNotification);
+            }
+            else stopRecording();
         };
         addAndMakeVisible (recordButton);
 
@@ -444,7 +576,84 @@ namespace gl
         snapBox.setTooltip (snapLabel.getTooltip());
         addAndMakeVisible (snapBox);
 
+        // --- Practice tools ---
+        loopToggle.setTooltip ("Loop section\nPlay repeats only the gold section of the tab, so you can practise one part.\n"
+                               "Drag in the ruler (bar numbers above the tab) to mark the section. Turning this on with no "
+                               "section marked loops the bar where the yellow cursor is. Turn it off to play everything again.\n"
+                               "Works with Guitar Lab's own Play button (the DAW has its own loop).");
+        loopToggle.onClick = [this]
+        {
+            if (loopToggle.getToggleState())
+            {
+                if (proc.loopEnd.load() <= proc.loopStart.load())
+                {
+                    const double bar = std::floor (tab.cursor / 4.0) * 4.0;
+                    proc.loopStart = bar;
+                    proc.loopEnd = std::min (proc.phrase.lengthBeats, bar + 4.0);
+                }
+            }
+            else
+            {
+                proc.loopStart = 0.0;
+                proc.loopEnd = 0.0;
+            }
+            tab.repaint();
+        };
+        addAndMakeVisible (loopToggle);
+
+        metronomeToggle.setTooltip ("Metronome\nA click on every beat (higher on the first beat of each bar) while the phrase plays, "
+                                    "with Guitar Lab's Play button or with the DAW. Only in Guitar Lab's audio output, never in the MIDI.");
+        addAndMakeVisible (metronomeToggle);
+        metronomeAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.params, ParamIDs::metronome, metronomeToggle);
+
+        countInToggle.setTooltip ("Count-in\nWhen you press Record guitar and nothing is playing: one bar of clicks (1 2 3 4) first, "
+                                  "then Play and the recording start together at the bar of the yellow cursor. So your notes land "
+                                  "in time with the bars. Turn on the Metronome too to keep hearing the beat.");
+        countInToggle.setToggleState (true, juce::dontSendNotification);
+        addAndMakeVisible (countInToggle);
+
+        zoomLabel.setText ("Zoom", juce::dontSendNotification);
+        zoomLabel.setJustificationType (juce::Justification::centredRight);
+        zoomLabel.setTooltip ("Zoom\nMake the tab view wider (+) or narrower (-). Fit shows the whole phrase. Also: Ctrl + mouse wheel.");
+        addAndMakeVisible (zoomLabel);
+        zoomOutButton.setTooltip ("Zoom out\nSee more bars at once.");
+        zoomInButton.setTooltip ("Zoom in\nWider notes, easier to read and click.");
+        zoomFitButton.setTooltip ("Fit\nShow the whole phrase in the window.");
+        zoomOutButton.onClick = [this] { setZoom (zoom / 1.5f); };
+        zoomInButton.onClick  = [this] { setZoom (zoom * 1.5f); };
+        zoomFitButton.onClick = [this] { setZoom (0.0f); };
+        for (auto* zb : { &zoomOutButton, &zoomInButton, &zoomFitButton }) addAndMakeVisible (zb);
+
+        editLabel.setText ("Selection", juce::dontSendNotification);
+        editLabel.setJustificationType (juce::Justification::centredRight);
+        editLabel.setTooltip ("Selected notes\nSelect notes in the tab view: click one, Ctrl + click more, or drag a box on an empty "
+                              "place. Then copy, cut, paste or move them. Ctrl + A selects everything.");
+        addAndMakeVisible (editLabel);
+        copyButton.setTooltip ("Copy (Ctrl + C)\nRemembers the selected notes, so you can paste them somewhere else.");
+        cutButton.setTooltip ("Cut (Ctrl + X)\nCopies the selected notes and removes them.");
+        pasteButton.setTooltip ("Paste (Ctrl + V)\nWrites the copied notes at the yellow cursor (the first copied note lands on the cursor). "
+                                "Paste again to repeat them.");
+        earlierButton.setTooltip ("Move earlier (Left key)\nMoves the selected notes one step earlier (the Step length).");
+        laterButton.setTooltip ("Move later (Right key)\nMoves the selected notes one step later.");
+        pitchUpButton.setTooltip ("One half step higher (Up key)\nMoves the selected notes one fret up, on the same string.\n"
+                                  "Shift + Up: the same pitch on the next higher string (another fingering).");
+        pitchDownButton.setTooltip ("One half step lower (Down key)\nMoves the selected notes one fret down, on the same string.\n"
+                                    "Shift + Down: the same pitch on the next lower string.");
+        copyButton.onClick      = [this] { copySelection(); };
+        cutButton.onClick       = [this] { copySelection(); deleteSelection(); };
+        pasteButton.onClick     = [this] { pasteClipboard(); };
+        earlierButton.onClick   = [this] { moveSelection (-stepBeats()); };
+        laterButton.onClick     = [this] { moveSelection (stepBeats()); };
+        pitchUpButton.onClick   = [this] { transposeSelection (1); };
+        pitchDownButton.onClick = [this] { transposeSelection (-1); };
+        for (auto* eb : { &copyButton, &cutButton, &pasteButton, &earlierButton, &laterButton, &pitchUpButton, &pitchDownButton })
+            addAndMakeVisible (eb);
+
         // --- Tab view ---
+        tab.onKey = [this] (const juce::KeyPress& k) { return handleKey (k); };
+        tab.onZoom = [this] (float f) { setZoom ((autoFit ? 1.0f : zoom) * f); };
+        tab.onLoopChanged = [this] { updateLoopButton(); };
+        tab.onSelectionChanged = [this] { board.setMarks (marks()); };
         tab.onSelect = [this] (int i)
         {
             if (i >= 0 && i < (int) proc.phrase.notes.size())
@@ -454,10 +663,8 @@ namespace gl
         };
         tab.onDelete = [this] (int i)
         {
-            pushUndo();
-            proc.phrase.notes.erase (proc.phrase.notes.begin() + i);
-            tab.selected = -1;
-            commit();
+            if (! tab.isSelected (i)) { tab.selection = { i }; tab.selected = i; }
+            deleteSelection();
         };
         tab.onCursorMoved = [this] { refresh(); };
         tabViewport.setViewedComponent (&tab, false);
@@ -497,6 +704,16 @@ namespace gl
         while (proc.popRecordEvents (recordBuffer.data(), (int) recordBuffer.size()) > 0) {}
         recordStarted = false;
         lastRecordBeat = 0.0;
+        playbackForRecording = false;
+
+        // Count-in: only when nothing plays. One bar of clicks, then Play and the recording start at the cursor's bar.
+        if (countInToggle.getToggleState() && ! proc.isInternalPlaying() && proc.playheadBeat.load() < 0)
+        {
+            playbackForRecording = true;
+            proc.startCountIn (std::floor (tab.cursor / 4.0) * 4.0, true);
+            statusLabel.setText ("Count-in: get ready...", juce::dontSendNotification);
+            return;
+        }
         proc.recordingGuitar = true;
         statusLabel.setText ("Recording... play your guitar. Press the red button to stop.", juce::dontSendNotification);
     }
@@ -523,6 +740,11 @@ namespace gl
         proc.recordingGuitar = false;
         drainRecording();
         recordButton.setToggleState (false, juce::dontSendNotification);
+        if (playbackForRecording)
+        {
+            proc.setInternalPlaying (false); // Play was started by the count-in
+            playbackForRecording = false;
+        }
 
         auto notes = recorder.finish (lastRecordBeat + 0.25); // notes still ringing end here
         if (notes.empty())
@@ -579,6 +801,7 @@ namespace gl
         proc.phrase = phraseFromText (undoStack.back());
         undoStack.pop_back();
         tab.selected = -1;
+        tab.selection.clear();
         commit();
     }
 
@@ -677,6 +900,7 @@ namespace gl
                 tab.selected = i;
         }
 
+        tab.selection = { tab.selected };
         tab.cursor += stepBeats();
         if (tab.cursor >= proc.phrase.lengthBeats - 1e-9)
             tab.cursor = 0.0;
@@ -767,8 +991,10 @@ namespace gl
         loadingControls = false;
 
         tab.gridStep = stepBeats();
-        // Use the whole width when the phrase is short; scroll when it is long.
-        tab.pxPerBeat = std::max (kPxPerBeat, (tabViewport.getWidth() - kTabLeft * 2) / (float) std::max (1.0, proc.phrase.lengthBeats));
+        tab.chords = chordTimeline (proc.phrase, proc.instrument);
+        // Zoom. "Auto" (the start): short phrases fill the width, long ones scroll.
+        const float fit = (tabViewport.getWidth() - kTabLeft * 2) / (float) std::max (1.0, proc.phrase.lengthBeats);
+        tab.pxPerBeat = autoFit ? std::max (kPxPerBeat, fit) : juce::jlimit (1.0f, 400.0f, kPxPerBeat * zoom);
         tab.setSize ((int) (kTabLeft * 2 + proc.phrase.lengthBeats * tab.pxPerBeat), juce::jmax (60, tabViewport.getHeight() - 12));
         tab.repaint();
 
@@ -783,7 +1009,13 @@ namespace gl
     {
         playButton.setButtonText (proc.isInternalPlaying() ? "Stop" : "Play");
 
-        if (proc.recordingGuitar.load())
+        if (proc.isCountingIn())
+        {
+            static const char* counts[] = { "", "1", "1  2", "1  2  3", "1  2  3  4" };
+            statusLabel.setText ("Count-in:  " + juce::String (counts[std::clamp (proc.countInBeat.load(), 0, 4)]) + "  ...",
+                                 juce::dontSendNotification);
+        }
+        else if (proc.recordingGuitar.load())
         {
             drainRecording();
             statusLabel.setText (recordStarted ? "Recording... " + juce::String (recorder.notesSoFar()) + " notes so far."
@@ -829,24 +1061,293 @@ namespace gl
         return file;
     }
 
-    void PhrasePanel::exportMidi()
+    // -----------------------------------------------------------------------
+    // Export
+    // -----------------------------------------------------------------------
+    TabExportInfo PhrasePanel::exportInfo (const juce::String& title) const
     {
-        chooser = std::make_unique<juce::FileChooser> ("Save the phrase as a MIDI file",
-                                                       juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("GuitarLab phrase.mid"),
-                                                       "*.mid");
+        TabExportInfo info;
+        info.title = title.toStdString();
+        info.bpm = proc.currentBpm();
+        return info;
+    }
+
+    void PhrasePanel::showExportMenu()
+    {
+        juce::PopupMenu m;
+        m.addItem (1, "MIDI file (.mid) - for your DAW");
+        m.addItem (2, "Text tab (.txt) - e|--3--5--|");
+        m.addItem (3, "PDF tab (.pdf) - to print or share");
+        m.addItem (4, "MusicXML (.musicxml) - MuseScore, Guitar Pro, Sibelius, Finale");
+        m.addItem (6, "Guitar Pro 3 (.gp3) - Guitar Pro, TuxGuitar, Songsterr", proc.instrument.numStrings() <= 7);
+        m.addSeparator();
+        m.addItem (5, "Copy text tab to the clipboard");
+        juce::Component::SafePointer<PhrasePanel> safe (this);
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&exportButton), [safe] (int kind)
+        {
+            if (safe == nullptr || kind == 0) return;
+            if (kind == 5)
+            {
+                juce::SystemClipboard::copyTextToClipboard (juce::String (phraseToTextTab (safe->proc.phrase, safe->proc.instrument,
+                                                                                         safe->exportInfo ("Guitar Lab phrase"))));
+                safe->statusLabel.setText ("Text tab copied. Paste it anywhere with Ctrl + V.", juce::dontSendNotification);
+                return;
+            }
+            safe->exportAs (kind);
+        });
+    }
+
+    void PhrasePanel::exportAs (int kind)
+    {
+        static const char* extensions[] = { "", "mid", "txt", "pdf", "musicxml", "", "gp3" };
+        static const char* what[] = { "", "a MIDI file", "text tab", "a PDF", "MusicXML", "", "a Guitar Pro 3 file" };
+        const juce::String ext (extensions[kind]);
+        chooser = std::make_unique<juce::FileChooser> ("Save the phrase as " + juce::String (what[kind]),
+                                                       juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                                                           .getChildFile ("GuitarLab phrase." + ext),
+                                                       "*." + ext);
         chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
-                              [this] (const juce::FileChooser& fc)
+                              [this, kind, ext] (const juce::FileChooser& fc)
         {
             auto file = fc.getResult();
             if (file == juce::File()) return;
-            file = file.withFileExtension ("mid");
+            file = file.withFileExtension (ext);
+            const auto info = exportInfo (file.getFileNameWithoutExtension());
+            bool ok = false;
             file.deleteFile();
-            juce::FileOutputStream out (file);
-            if (out.openedOk() && buildMidiFile().writeTo (out))
-                statusLabel.setText ("Saved " + file.getFileName(), juce::dontSendNotification);
+            if (kind == 1)
+            {
+                juce::FileOutputStream out (file);
+                ok = out.openedOk() && buildMidiFile().writeTo (out);
+            }
             else
-                statusLabel.setText ("Could not save the file.", juce::dontSendNotification);
+            {
+                const std::string data = kind == 2 ? phraseToTextTab (proc.phrase, proc.instrument, info)
+                                       : kind == 3 ? phraseToPdf (proc.phrase, proc.instrument, info)
+                                       : kind == 6 ? phraseToGuitarPro3 (proc.phrase, proc.instrument, info)
+                                                   : phraseToMusicXml (proc.phrase, proc.instrument, info);
+                juce::FileOutputStream out (file);
+                ok = out.openedOk() && out.write (data.data(), data.size());
+            }
+            statusLabel.setText (ok ? "Saved " + file.getFileName() : juce::String ("Could not save the file."), juce::dontSendNotification);
         });
+    }
+
+    // -----------------------------------------------------------------------
+    // Selected notes
+    // -----------------------------------------------------------------------
+    std::vector<int> PhrasePanel::selectedIndices() const
+    {
+        std::vector<int> out;
+        for (int i : tab.selection)
+            if (i >= 0 && i < (int) proc.phrase.notes.size()) out.push_back (i);
+        if (out.empty() && tab.selected >= 0 && tab.selected < (int) proc.phrase.notes.size())
+            out.push_back (tab.selected);
+        std::sort (out.begin(), out.end());
+        out.erase (std::unique (out.begin(), out.end()), out.end());
+        return out;
+    }
+
+    void PhrasePanel::selectMatching (const std::vector<NoteEvent>& wanted)
+    {
+        // Indices change when the phrase is sorted: find the notes again by string, fret and start.
+        tab.selection.clear();
+        for (const auto& w : wanted)
+            for (int i = 0; i < (int) proc.phrase.notes.size(); ++i)
+            {
+                const auto& n = proc.phrase.notes[(size_t) i];
+                if (n.string == w.string && n.fret == w.fret && std::abs (n.start - w.start) < 1e-6 && ! tab.isSelected (i))
+                {
+                    tab.selection.push_back (i);
+                    break;
+                }
+            }
+        tab.selected = tab.selection.empty() ? -1 : tab.selection.front();
+        if (tab.selected >= 0) loadControlsFrom (proc.phrase.notes[(size_t) tab.selected]);
+        board.setMarks (marks());
+        tab.repaint();
+    }
+
+    void PhrasePanel::selectAll()
+    {
+        tab.selection.clear();
+        for (int i = 0; i < (int) proc.phrase.notes.size(); ++i) tab.selection.push_back (i);
+        tab.selected = tab.selection.empty() ? -1 : 0;
+        tab.repaint();
+        statusLabel.setText (juce::String ((int) tab.selection.size()) + " notes selected.", juce::dontSendNotification);
+    }
+
+    void PhrasePanel::copySelection()
+    {
+        const auto idx = selectedIndices();
+        if (idx.empty()) { statusLabel.setText ("Select notes first (click, Ctrl + click, or drag a box).", juce::dontSendNotification); return; }
+        clipboard.clear();
+        double first = 1e9;
+        for (int i : idx) first = std::min (first, proc.phrase.notes[(size_t) i].start);
+        for (int i : idx)
+        {
+            auto n = proc.phrase.notes[(size_t) i];
+            n.start -= first;
+            clipboard.push_back (n);
+        }
+        statusLabel.setText ("Copied " + juce::String ((int) clipboard.size()) + " notes. Move the cursor and press Paste.",
+                             juce::dontSendNotification);
+    }
+
+    void PhrasePanel::deleteSelection()
+    {
+        auto idx = selectedIndices();
+        if (idx.empty()) return;
+        pushUndo();
+        for (auto it = idx.rbegin(); it != idx.rend(); ++it)
+            proc.phrase.notes.erase (proc.phrase.notes.begin() + *it);
+        tab.selection.clear();
+        tab.selected = -1;
+        commit();
+    }
+
+    void PhrasePanel::pasteClipboard()
+    {
+        if (clipboard.empty()) { statusLabel.setText ("Nothing copied yet.", juce::dontSendNotification); return; }
+        pushUndo();
+
+        // Chords keep their own (new) group numbers.
+        std::map<int, int> groups;
+        std::vector<NoteEvent> pasted;
+        double end = tab.cursor;
+        for (auto n : clipboard)
+        {
+            n.start += tab.cursor;
+            if (n.group >= 0)
+            {
+                if (! groups.count (n.group)) groups[n.group] = proc.phrase.nextGroup++;
+                n.group = groups[n.group];
+            }
+            end = std::max (end, n.start + n.length);
+            proc.phrase.notes.push_back (n);
+            pasted.push_back (n);
+        }
+        // Make the phrase long enough.
+        for (int bars : { 1, 2, 4, 8, 16, 32, 64, 128, 256, 512 })
+            if (bars * 4.0 >= end || bars == 512) { proc.phrase.lengthBeats = std::max (proc.phrase.lengthBeats, bars * 4.0); break; }
+
+        tab.cursor = std::min (end, proc.phrase.lengthBeats - stepBeats());
+        commit();
+        selectMatching (pasted);
+        statusLabel.setText ("Pasted " + juce::String ((int) pasted.size()) + " notes.", juce::dontSendNotification);
+    }
+
+    void PhrasePanel::moveSelection (double beats)
+    {
+        const auto idx = selectedIndices();
+        if (idx.empty()) return;
+        double first = 1e9;
+        for (int i : idx) first = std::min (first, proc.phrase.notes[(size_t) i].start);
+        beats = std::max (beats, -first); // not before the start
+        if (std::abs (beats) < 1e-9) return;
+
+        pushUndo();
+        std::vector<NoteEvent> moved;
+        for (int i : idx)
+        {
+            auto& n = proc.phrase.notes[(size_t) i];
+            n.start = std::min (n.start + beats, proc.phrase.lengthBeats - 0.05);
+            moved.push_back (n);
+        }
+        commit();
+        selectMatching (moved);
+    }
+
+    void PhrasePanel::transposeSelection (int semitones)
+    {
+        const auto idx = selectedIndices();
+        if (idx.empty()) return;
+        for (int i : idx)
+        {
+            const int f = proc.phrase.notes[(size_t) i].fret + semitones;
+            if (f < 0 || f > kNumFrets) { statusLabel.setText ("Cannot move past the nut or fret 24.", juce::dontSendNotification); return; }
+        }
+        pushUndo();
+        std::vector<NoteEvent> moved;
+        for (int i : idx)
+        {
+            auto& n = proc.phrase.notes[(size_t) i];
+            n.fret += semitones;
+            n.slideToFret = juce::jlimit (0, kNumFrets, n.slideToFret + semitones);
+            moved.push_back (n);
+        }
+        commit();
+        selectMatching (moved);
+    }
+
+    void PhrasePanel::moveSelectionString (int direction)
+    {
+        const auto idx = selectedIndices();
+        if (idx.empty()) return;
+        const auto& tuning = proc.instrument.tuning();
+        for (int i : idx)
+        {
+            const auto& n = proc.phrase.notes[(size_t) i];
+            const int s = n.string + direction;
+            const int f = s >= 0 && s < proc.instrument.numStrings() ? n.fret + tuning[(size_t) n.string] - tuning[(size_t) s] : -1;
+            if (f < 0 || f > kNumFrets) { statusLabel.setText ("That note cannot be played on the next string.", juce::dontSendNotification); return; }
+        }
+        pushUndo();
+        std::vector<NoteEvent> moved;
+        for (int i : idx)
+        {
+            auto& n = proc.phrase.notes[(size_t) i];
+            const int s = n.string + direction;
+            const int shift = tuning[(size_t) n.string] - tuning[(size_t) s];
+            n.fret += shift;
+            n.slideToFret = juce::jlimit (0, kNumFrets, n.slideToFret + shift);
+            n.string = s;
+            moved.push_back (n);
+        }
+        commit();
+        selectMatching (moved);
+    }
+
+    bool PhrasePanel::handleKey (const juce::KeyPress& k)
+    {
+        const auto mods = k.getModifiers();
+        const bool ctrl = mods.isCommandDown() || mods.isCtrlDown();
+        const int code = k.getKeyCode();
+        if (k == juce::KeyPress::deleteKey || k == juce::KeyPress::backspaceKey) { deleteSelection(); return true; }
+        if (ctrl && (code == 'C' || code == 'c')) { copySelection(); return true; }
+        if (ctrl && (code == 'X' || code == 'x')) { copySelection(); deleteSelection(); return true; }
+        if (ctrl && (code == 'V' || code == 'v')) { pasteClipboard(); return true; }
+        if (ctrl && (code == 'A' || code == 'a')) { selectAll(); return true; }
+        if (ctrl && (code == 'Z' || code == 'z')) { undo(); return true; }
+        if (code == juce::KeyPress::leftKey)  { moveSelection (-stepBeats()); return true; }
+        if (code == juce::KeyPress::rightKey) { moveSelection (stepBeats()); return true; }
+        if (code == juce::KeyPress::upKey)    { if (mods.isShiftDown()) moveSelectionString (-1); else transposeSelection (1); return true; }
+        if (code == juce::KeyPress::downKey)  { if (mods.isShiftDown()) moveSelectionString (1); else transposeSelection (-1); return true; }
+        return false;
+    }
+
+    void PhrasePanel::setZoom (float factor)
+    {
+        if (factor <= 0.0f)
+        {
+            // Fit: the whole phrase in the window
+            const float fit = (tabViewport.getWidth() - kTabLeft * 2) / (float) std::max (1.0, proc.phrase.lengthBeats);
+            zoom = std::max (0.02f, fit / kPxPerBeat);
+        }
+        else
+            zoom = juce::jlimit (0.02f, 8.0f, factor);
+        autoFit = false;
+
+        // Keep the cursor in view.
+        const double cursorBeat = tab.cursor;
+        refresh();
+        const int x = (int) (kTabLeft + cursorBeat * tab.pxPerBeat) - tabViewport.getWidth() / 2;
+        tabViewport.setViewPosition (std::max (0, x), 0);
+    }
+
+    void PhrasePanel::updateLoopButton()
+    {
+        loopToggle.setToggleState (proc.loopEnd.load() > proc.loopStart.load(), juce::dontSendNotification);
     }
 
     // -----------------------------------------------------------------------
@@ -887,7 +1388,15 @@ namespace gl
         put (c, playButton, 60);
         put (c, exportButton, 100);
         put (c, dragArea, 140);
-        statusLabel.setBounds (c);
+        put (c, toReharmButton, 120);
+
+        auto d = row();
+        put (d, loopToggle, 110);      put (d, metronomeToggle, 100);  put (d, countInToggle, 90);
+        put (d, zoomLabel, 44);        put (d, zoomOutButton, 28);     put (d, zoomInButton, 28);  put (d, zoomFitButton, 40);
+        put (d, editLabel, 66);
+        put (d, copyButton, 50);       put (d, cutButton, 44);         put (d, pasteButton, 52);
+        put (d, earlierButton, 28);    put (d, laterButton, 28);       put (d, pitchUpButton, 32); put (d, pitchDownButton, 32);
+        statusLabel.setBounds (d);
 
         tabViewport.setBounds (r);
         refresh();

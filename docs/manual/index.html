@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guitar Lab Manual</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@600;700&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap">
+<style>
+/* Layout: one reading column; sticky chip nav; each area = screenshot + list of controls with a "how often" tag. */
+:root {
+  --bg: #eef0f3;
+  --surface: #ffffff;
+  --sunk: #e3e6eb;
+  --fg: #1b1f27;
+  --muted: #586172;
+  --line: #d3d8e0;
+  --accent: #9a7200;
+  --accent-fill: #f2c230;
+  --on-accent: #1b1f27;
+  --often: #17864a;
+  --once: #9a7200;
+  --opt: #3561c4;
+  --leave: #6b7382;
+  --warn: #b5402c;
+  --font-display: "Archivo Narrow", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --font-body: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14171d; --surface: #1c2028; --sunk: #232833; --fg: #e8eaef; --muted: #9ba4b4; --line: #2d333f;
+    --accent: #f2c230; --accent-fill: #f2c230; --on-accent: #14171d;
+    --often: #5ad893; --once: #f2c230; --opt: #86a8ff; --leave: #8d95a4; --warn: #ff8a73;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14171d; --surface: #1c2028; --sunk: #232833; --fg: #e8eaef; --muted: #9ba4b4; --line: #2d333f;
+  --accent: #f2c230; --accent-fill: #f2c230; --on-accent: #14171d;
+  --often: #5ad893; --once: #f2c230; --opt: #86a8ff; --leave: #8d95a4; --warn: #ff8a73;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: var(--font-body); font-size: 16.5px; line-height: 1.6;
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--surface); }
+.wrap {
+  max-width: 980px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; line-height: 1.15; margin: 0; }
+h1 { font-size: clamp(2.1rem, 5vw, 3rem); letter-spacing: -0.01em; }
+h2 { font-size: 1.85rem; }
+h3 { font-size: 1.25rem; }
+p { margin: 0; max-width: 68ch; }
+a { color: var(--accent); }
+img { display: block; max-width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--line); }
+
+header.top { padding-block: 40px 22px; display: grid; gap: 12px; }
+.eyebrow { font-size: 0.78rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+.lead { font-size: 1.12rem; color: var(--muted); }
+
+nav.chips {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--line);
+}
+nav.chips .inner { display: flex; gap: 6px; overflow-x: auto; padding-block: 10px; scrollbar-width: thin; }
+nav.chips a {
+  flex: none; text-decoration: none; color: var(--fg); font-size: 0.9rem; font-weight: 700;
+  border: 1px solid var(--line); background: var(--surface); padding: 5px 12px; border-radius: 999px;
+}
+nav.chips a:hover, nav.chips a:focus-visible { border-color: var(--accent); outline: none; }
+nav.chips a.here { background: var(--accent-fill); color: var(--on-accent); border-color: var(--accent-fill); }
+
+section { padding-block: 44px 8px; display: grid; gap: 16px; scroll-margin-top: 64px; }
+section > .head { display: grid; gap: 8px; }
+
+.calm {
+  background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--often);
+  border-radius: 8px; padding: 16px 18px; display: grid; gap: 8px;
+}
+.calm strong { color: var(--often); }
+
+.legend { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 0.92rem; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+
+.tag {
+  display: inline-block; font-size: 0.74rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  padding: 2px 8px; border-radius: 4px; border: 1.5px solid currentColor; white-space: nowrap;
+}
+.tag.often { color: var(--often); }
+.tag.once  { color: var(--once); }
+.tag.opt   { color: var(--opt); }
+.tag.leave { color: var(--leave); }
+
+/* Recipes */
+.recipes { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.recipe { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px 18px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.recipe h3 { font-size: 1.2rem; }
+.recipe ol { margin: 0; padding-left: 1.3em; display: grid; gap: 6px; }
+.recipe .for { font-size: 0.9rem; color: var(--muted); }
+
+/* Control chip: looks like a button in the plugin */
+.chip {
+  display: inline-block; font-weight: 700; font-size: 0.92rem; line-height: 1.3;
+  padding: 2px 9px; border-radius: 5px; border: 1px solid var(--line); background: var(--sunk); color: var(--fg);
+  white-space: nowrap;
+}
+
+/* Window map */
+.map { position: relative; }
+.map img { width: 100%; }
+.band {
+  position: absolute; left: -2px; width: 6px; border-radius: 3px; background: var(--accent-fill);
+}
+.band b {
+  position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+  width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--accent-fill); color: #14171d; font-size: 0.85rem; box-shadow: 0 0 0 2px #14171d;
+}
+.maplist { margin: 0; padding-left: 1.4em; display: grid; gap: 6px; }
+
+/* Control list */
+.controls { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.controls h3 { padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--sunk); font-size: 1.05rem; }
+.row {
+  display: grid; grid-template-columns: minmax(150px, 220px) 1fr auto; gap: 6px 16px;
+  padding: 11px 16px; border-bottom: 1px solid var(--line); align-items: start;
+}
+.row:last-child { border-bottom: 0; }
+.row .ctl { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.row .what { min-width: 0; }
+.row .what p + p { margin-top: 4px; }
+.row .what .sub { color: var(--muted); font-size: 0.94rem; }
+.row .t { justify-self: end; }
+@media (max-width: 640px) {
+  .row { grid-template-columns: 1fr auto; }
+  .row .what { grid-column: 1 / -1; grid-row: 2; }
+}
+
+.shot { display: grid; gap: 6px; }
+.shot figcaption { font-size: 0.88rem; color: var(--muted); }
+figure { margin: 0; }
+.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+@media (max-width: 760px) { .two { grid-template-columns: 1fr; } }
+
+.note { font-size: 0.95rem; color: var(--muted); }
+.warnline { color: var(--warn); font-weight: 700; }
+.steps { margin: 0; padding-left: 1.4em; display: grid; gap: 6px; }
+.colors { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.colors li { display: flex; gap: 10px; align-items: baseline; }
+.dot { width: 13px; height: 13px; border-radius: 50%; flex: none; transform: translateY(2px); border: 1px solid rgba(0,0,0,.25); }
+footer { padding-block: 40px 60px; color: var(--muted); font-size: 0.9rem; }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+</style>
+</head>
+<body>
+<header class="wrap top">
+  <div class="eyebrow">Guitar Lab v0.3 · user manual</div>
+  <h1>Guitar Lab Manual</h1>
+  <p class="lead">Every button, menu and setting, explained. Each one has a tag that says how often you need to touch it. Most of them you never touch.</p>
+  <div class="legend" aria-label="What the tags mean">
+    <span><span class="tag often">Use often</span> you will use it while playing</span>
+    <span><span class="tag once">Set once</span> set it at the start, then forget it</span>
+    <span><span class="tag opt">Optional</span> only when you want that feature</span>
+    <span><span class="tag leave">Leave alone</span> the default is right</span>
+  </div>
+</header>
+
+<nav class="chips" aria-label="Sections">
+  <div class="wrap inner">
+    <a href="#start">Start here</a>
+    <a href="#map">The window</a>
+    <a href="#topbar">Top bar</a>
+    <a href="#tracking">Guitar → MIDI</a>
+    <a href="#calibration">Calibration</a>
+    <a href="#intonation">Intonation</a>
+    <a href="#playwrite">Play &amp; Write</a>
+    <a href="#export">Export</a>
+    <a href="#shapes">Chord Shapes</a>
+    <a href="#analyser">Chord name</a>
+    <a href="#reharm">Reharm Lab</a>
+    <a href="#trainer">Trainer</a>
+    <a href="#midisound">MIDI / Sound</a>
+    <a href="#neck">Fretboard &amp; piano</a>
+  </div>
+</nav>
+
+<main class="wrap">
+
+<!-- ============================================================ START -->
+<section id="start">
+  <div class="head">
+    <h2>Start here</h2>
+    <p>Guitar Lab is five tools in one window. To turn your guitar into MIDI you only need the <b>top bar</b> and the <b>Guitar → MIDI</b> tab. The other tabs are separate tools you can open later.</p>
+  </div>
+
+  <div class="calm">
+    <p><strong>You can ignore for now:</strong> Chord Shapes, Reharm Lab, Trainer, the keyswitches, the MIDI channel settings, and almost all of the Play &amp; Write controls. They do nothing until you use them.</p>
+    <p>Not sure what something is? Hold the mouse over it. Every control has a tooltip, and its first line in bold is its name. The <span class="chip">Manual</span> button in the top bar opens this page.</p>
+  </div>
+
+  <div class="recipes">
+    <div class="recipe">
+      <h3>A. Practise with Guitar Lab's own sound</h3>
+      <div class="for">You play, Guitar Lab plays along with its plucked sound.</div>
+      <ol>
+        <li>Put Guitar Lab on the <b>audio track</b> your guitar is plugged into. Set the track's Monitor to <b>In</b>.</li>
+        <li>Top bar: check <span class="chip">Strings</span> and <span class="chip">Tuning</span> match your guitar.</li>
+        <li>Guitar → MIDI tab: <span class="chip">Tracking</span> = <i>single notes (mono)</i> for lead playing, or <i>chords too (poly)</i> for chords. <span class="chip">Input</span> = the input your guitar is on.</li>
+        <li>Press <span class="chip">Calibrate...</span> once and follow the steps. Then save it with <span class="chip">Save as preset</span>.</li>
+        <li>Tick <span class="chip">Built-in sound</span>. Tick <span class="chip">Hear guitar</span> if you also want your real guitar.</li>
+      </ol>
+    </div>
+    <div class="recipe">
+      <h3>B. Play another instrument with your guitar</h3>
+      <div class="for">Your guitar plays a synth or sampler in your DAW (Ableton shown).</div>
+      <ol>
+        <li>Do steps 1–4 of recipe A.</li>
+        <li>Untick <span class="chip">Built-in sound</span>, so you only hear the other instrument.</li>
+        <li>Make a <b>MIDI track</b> with the instrument. <b>MIDI From</b> = your guitar track. In the second box below it choose <b>Guitar Lab</b>. Monitor = <b>In</b>.</li>
+        <li>For bends on each string: right-click the instrument's title bar and choose <b>Enable MPE Mode</b>. Set its pitch bend range to 12.</li>
+      </ol>
+    </div>
+    <div class="recipe">
+      <h3>C. Turn your playing into tab</h3>
+      <div class="for">Guitar Lab writes what you play as editable tab, then you export it.</div>
+      <ol>
+        <li>Do steps 1–4 of recipe A.</li>
+        <li>Open <b>Play &amp; Write</b>. Tick <span class="chip">Count-in</span> and <span class="chip">Metronome</span> if you want to play in time.</li>
+        <li>Press <span class="chip">Record guitar</span> (red). After the count-in, play. Press it again to stop.</li>
+        <li>Fix anything by hand (click a note, change it; Undo removes the whole take). Then <span class="chip">Export...</span> as PDF, text tab, MusicXML or Guitar Pro.</li>
+      </ol>
+    </div>
+    <div class="recipe">
+      <h3>D. Learn a chord</h3>
+      <div class="for">See every way to play any chord.</div>
+      <ol>
+        <li>Open <b>Chord Shapes</b>. Type the chord (for example <code>Cmaj7</code>, <code>F#m7b5</code>, <code>D/F#</code>) or pick a root and a type.</li>
+        <li>The gold cards come first: the fingerings most guitarists use (open chord, barre chords). All other shapes follow.</li>
+        <li>Click a card to hear it and see it on the big fretboard, with each note's job (R, 3, 5, 7…).</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ MAP -->
+<section id="map">
+  <div class="head">
+    <h2>The window</h2>
+    <p>Five parts, from top to bottom. The fretboard and piano are always visible; the middle part changes with the tab you pick.</p>
+  </div>
+  <figure class="shot">
+    <div class="map">
+      <img src="img/13-poly-chord-and-chord-name.jpg" width="1320" height="860" alt="The Guitar Lab window: a strummed C chord is heard and named">
+      <div class="band" style="top:0.4%;height:6.8%"><b>1</b></div>
+      <div class="band" style="top:7.9%;height:24.6%"><b>2</b></div>
+      <div class="band" style="top:33.2%;height:2.8%"><b>3</b></div>
+      <div class="band" style="top:36.4%;height:52%"><b>4</b></div>
+      <div class="band" style="top:89.4%;height:10.2%"><b>5</b></div>
+    </div>
+    <figcaption>A strummed open C chord, tracked in poly mode: green dots on five strings, green keys on the piano, and "Chord: C" at the right of the tab row.</figcaption>
+  </figure>
+  <ol class="maplist">
+    <li><b>Top bar</b>: your guitar (strings, tuning), the scale display, the version, <span class="chip">Manual</span> and <span class="chip">MIDI / Sound...</span>. <a href="#topbar">Details</a></li>
+    <li><b>Fretboard</b>: 24 frets. Shows what is sounding; click it to play. <a href="#neck">Details</a></li>
+    <li><b>Tabs</b>: Guitar → MIDI (opens first), Play &amp; Write, Chord Shapes, Reharm Lab, Trainer. At the right: the <b>chord name</b> of what sounds now. <a href="#analyser">Details</a></li>
+    <li><b>Tab area</b>: the controls of the tab you picked.</li>
+    <li><b>Piano</b>: the same notes on a keyboard. <a href="#neck">Details</a></li>
+  </ol>
+</section>
+
+<!-- ============================================================ TOP BAR -->
+<section id="topbar">
+  <div class="head">
+    <h2>Top bar</h2>
+    <p>Tell Guitar Lab what guitar you have. Do this <b>before</b> you calibrate: a calibration only fits the tuning it was made for.</p>
+  </div>
+  <figure class="shot"><img src="img/m-topbar.jpg" width="1320" height="64" alt="The top bar"></figure>
+  <div class="controls">
+    <h3>Your guitar</h3>
+    <div class="row"><div class="ctl"><span class="chip">Strings</span></div><div class="what"><p>6, 7 or 8 strings. Changing it loads the standard tuning for that guitar.</p><p class="sub">Phrase notes on strings that no longer exist are removed.</p></div><span class="tag once t">Set once</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Tuning</span></div><div class="what"><p>A ready tuning: Standard, Drop D, Open G, DADGAD and more. "Custom" when you changed a single string yourself.</p></div><span class="tag once t">Set once</span></div>
+    <div class="row"><div class="ctl"><span class="chip">-1</span><span class="chip">+1</span></div><div class="what"><p>Every string down or up a half step (E standard → Eb standard).</p></div><span class="tag once t">Set once</span></div>
+    <div class="row"><div class="ctl"><span class="chip">E2</span><span class="chip">A2</span><span class="chip">…</span></div><div class="what"><p>The open note of each string, <b>low string on the left</b>. Change one box for your own tuning.</p><p class="sub">The number is the octave: E2 is the low E of a normal guitar, E4 the high E.</p></div><span class="tag once t">Set once</span></div>
+  </div>
+  <div class="controls">
+    <h3>Display and help</h3>
+    <div class="row"><div class="ctl"><span class="chip">Show scale</span></div><div class="what"><p>Root and scale type: shows that scale on the whole neck and the piano. Orange = root, grey = other notes. "Off" hides it. Only a display.</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">All note names</span></div><div class="what"><p>Every note name on every fret, faintly. Good for learning the neck.</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Flats</span></div><div class="what"><p>Bb, Eb… instead of A#, D#… Same notes, other names.</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">v0.3.0</span></div><div class="what"><p>The version you have installed.</p></div><span class="tag leave t">Leave alone</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Manual</span></div><div class="what"><p>Opens this manual in your web browser.</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">MIDI / Sound...</span></div><div class="what"><p>MIDI and sound settings. Most can stay as they are. <a href="#midisound">See the list</a></p></div><span class="tag once t">Set once</span></div>
+  </div>
+</section>
+
+<!-- ============================================================ TRACKING -->
+<section id="tracking">
+  <div class="head">
+    <h2>Guitar → MIDI tab</h2>
+    <p>Listens to your real guitar and turns it into MIDI: notes, bends, slides, vibrato and velocity. It is the first tab and opens by default.</p>
+  </div>
+  <figure class="shot"><img src="img/m-tracking.jpg" width="1320" height="300" alt="The Guitar to MIDI tab"><figcaption>The heard note, how far it is from the right pitch, the input level, and the saved-calibrations row.</figcaption></figure>
+  <div class="controls">
+    <h3>Settings</h3>
+    <div class="row"><div class="ctl"><span class="chip">Tracking</span></div><div class="what">
+      <p><b>Off</b>: Guitar Lab does not listen.</p>
+      <p><b>Normal guitar: single notes (mono)</b>: one note at a time. The fastest and most exact mode for lead playing: bends, slides, vibrato, hammer-ons.</p>
+      <p><b>Normal guitar: chords too (poly)</b>: several notes at once from one cable: chords, double stops, ringing arpeggios, with bends per note. About 50–65 ms delay. It can miss an octave note hidden inside another string's sound; known chord shapes fill those in. A Full calibration makes it much better.</p>
+      <p><b>Hex pickup</b>: a special pickup with one output per string (like a Roland GK). Every string tracked on its own.</p></div><span class="tag once t">Set once</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Input</span></div><div class="what"><p>Which input your guitar is on. In a DAW this is the left (Input 1) or right (Input 2) channel of the track. "Mix of all inputs" adds them.</p></div><span class="tag once t">Set once</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Speed / safety</span></div><div class="what"><p>1–2 = fastest, but more wrong "blip" notes on the pick attack. <b>3 = default.</b> 5–8 = slower, very few wrong notes.</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Sensitivity</span></div><div class="what"><p>Higher = soft and ghost notes too, but noise may start notes. Lower = only strong notes. <b>1.00 = the level found by calibration.</b></p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Track bends / slides / vibrato</span></div><div class="what"><p>On: pitch changes become smooth pitch bend. Off: every pitch change is a new note (for instruments that handle pitch bend badly).</p></div><span class="tag leave t">Leave alone</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Hear guitar</span></div><div class="what"><p>Your clean guitar through Guitar Lab's output. On a DAW track Guitar Lab replaces the track's sound, so turn this on to hear your guitar too. Off if you hear it another way (amp, interface), or you will hear it twice.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Built-in sound</span></div><div class="what"><p>On: Guitar Lab's own plucked sound, to practise alone. Off: silent, MIDI only, when the MIDI plays another instrument.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Calibrate...</span></div><div class="what"><p>Teaches the tracker your guitar. <a href="#calibration">See calibration</a>.</p></div><span class="tag once t">Set once</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Intonation...</span></div><div class="what"><p>The intonation report of your guitar. <a href="#intonation">See below</a>.</p></div><span class="tag opt t">Optional</span></div>
+  </div>
+  <div class="controls">
+    <h3>Saved calibrations (presets)</h3>
+    <div class="row"><div class="ctl"><span class="chip">Saved calibrations ▼</span></div><div class="what"><p>Pick one to load it. It also sets <b>Strings</b> and <b>Tuning</b> to the ones it was made for. Calibrate each guitar (and tuning) once, save it, and load it again later.</p><p class="sub">Shared by all your projects and the standalone app. Stored as small files in <code>%APPDATA%\Guitar Lab\Calibrations</code>.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Name box</span><span class="chip">Save as preset</span></div><div class="what"><p>Type a name (for example "Strat Drop D") and save the calibration you are using now. The same name replaces the old one.</p></div><span class="tag once t">Set once</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Delete</span></div><div class="what"><p>Deletes the chosen preset file. Click twice ("Sure?") to be safe.</p></div><span class="tag opt t">Optional</span></div>
+  </div>
+  <div class="controls">
+    <h3>What you see</h3>
+    <div class="row"><div class="ctl"><span class="chip">Live input view</span></div><div class="what">
+      <p><b>Left:</b> the note it hears. <b>Middle bar:</b> how far from that note, in cents (100 cents = one half step): green in tune, yellow a little off, red far off. A tuner, too.</p>
+      <p><b>Right bar:</b> your input level. The <b>yellow line</b> is the level a note must reach. If you never cross it, raise Sensitivity or the input gain.</p></div><span class="tag leave t">Leave alone</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Red warning line</span></div><div class="what"><p>Only when something is wrong ("No audio input"…). Read it first if nothing is tracked.</p></div><span class="tag leave t">Leave alone</span></div>
+  </div>
+</section>
+
+<!-- ============================================================ CALIBRATION -->
+<section id="calibration">
+  <div class="head">
+    <h2>Calibration</h2>
+    <p>Guitar Lab listens to your guitar once and remembers how it really sounds. Tracking is much better afterwards. It is saved with your project, and you can save it as a preset.</p>
+  </div>
+  <div class="two">
+    <figure class="shot"><img src="img/m-cal-start.jpg" width="1280" height="435" alt="Calibration step 1"><figcaption>Step 1: check the tuning, then choose Quick or Full.</figcaption></figure>
+    <figure class="shot"><img src="img/09-full-calibration-every-note.jpg" width="1320" height="860" alt="Full calibration asking for a fret"><figcaption>Full calibration: the yellow dot shows what to play next.</figcaption></figure>
+  </div>
+  <div class="controls">
+    <h3>Step 1 · your tuning</h3>
+    <div class="row"><div class="ctl"><span class="chip">Quick calibration (1-2 min)</span></div><div class="what"><p>Quiet for 3 seconds → each open string → the 12th fret on the lowest and highest string → pick softly 4 times → pick hard 4 times.</p></div><span class="tag once t">Set once</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Full calibration (15-20 min)</span></div><div class="what"><p>Quiet → <b>every fret on every string</b> → about <b>37 chords</b>, 3 strums each (open, 7th, maj7, sus, barre and power chords, in the fingerings most people use) → soft and hard picking on <b>every string</b>.</p><p class="sub">Best results: the string is guessed from its sound, poly mode learns your guitar's tone, taught chords are recognised, velocity fits each string, and you get the intonation report.</p></div><span class="tag once t">Set once</span></div>
+  </div>
+  <div class="controls">
+    <h3>While it listens</h3>
+    <div class="row"><div class="ctl"><span class="chip">Retry</span></div><div class="what"><p>Listen to this step again (you played the wrong note).</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Accept</span></div><div class="what"><p>Keep it even though it looked wrong. Only active when Guitar Lab is unsure.</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Skip</span></div><div class="what"><p>Skip this step; safe defaults are used.</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">My guitar ends here</span></div><div class="what"><p>The fret asked for does not exist on your guitar (fret 23 on a 22-fret guitar).</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Save calibration</span><span class="chip">Discard</span></div><div class="what"><p>At the end: use the new results, or keep the old ones.</p></div><span class="tag once t">Set once</span></div>
+  </div>
+  <p class="note">Calibrate again after new strings, another tuning, another pickup or another audio interface.</p>
+</section>
+
+<!-- ============================================================ INTONATION -->
+<section id="intonation">
+  <div class="head">
+    <h2>Intonation report</h2>
+    <p>From a Full calibration: how in tune every fret of your guitar plays, compared with its own open string, and what to adjust.</p>
+  </div>
+  <figure class="shot"><img src="img/17-intonation-report.jpg" width="1320" height="860" alt="Intonation report"><figcaption>An example: the two low strings play sharp up the neck, so their saddles need to move back.</figcaption></figure>
+  <div class="calm">
+    <p><strong>How to read it:</strong> green = within 5 cents (fine), yellow = 5–12, red = more. If the 12th fret is <b>sharp</b>, the string is too short: move its bridge saddle <b>back</b> (away from the neck). If it is <b>flat</b>, move it <b>forward</b>. Change one saddle a little at a time, retune, and calibrate again to check.</p>
+  </div>
+</section>
+
+<!-- ============================================================ PLAY & WRITE -->
+<section id="playwrite">
+  <div class="head">
+    <h2>Play &amp; Write tab</h2>
+    <p>Holds a <b>phrase</b>: guitar music shown as tab, up to 512 bars (about 17 minutes at 120 BPM). Record it from your real guitar, or write it with the mouse. It plays as MIDI, becomes a MIDI clip, or exports as tab.</p>
+  </div>
+  <figure class="shot"><img src="img/m-play-write.jpg" width="1320" height="476" alt="The Play and Write tab"><figcaption>The gold names under the bar numbers are the chords Guitar Lab found in the phrase.</figcaption></figure>
+
+  <div class="controls">
+    <h3>Recording your guitar</h3>
+    <div class="row"><div class="ctl"><span class="chip">Record guitar</span></div><div class="what"><p>Press (red), play, press again. Your playing appears as tab: hammer-ons (h), pull-offs (p), bends (b), slides (/ \), vibrato (~) and chords are recognised. One Undo removes the whole take.</p><p class="sub">Needs Guitar → MIDI tracking on. If the DAW (or Play) runs, notes keep their place in the bar.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Count-in</span></div><div class="what"><p>When nothing is playing: one bar of clicks (1 2 3 4), then Play and the recording start together at the bar of the cursor. Your notes land on the beat.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Metronome</span></div><div class="what"><p>A click on every beat (higher on beat 1) while the phrase plays. Only in Guitar Lab's audio, never in the MIDI.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Snap</span></div><div class="what"><p>Moves recorded notes to the grid. 1/16 (default) or 1/8 = tidy tab; Off = your exact timing.</p></div><span class="tag opt t">Optional</span></div>
+  </div>
+
+  <div class="controls">
+    <h3>Practice and playback</h3>
+    <div class="row"><div class="ctl"><span class="chip">Play</span></div><div class="what"><p>Plays the phrase in a loop at the internal tempo. With "Sync to host" on, it also plays when the DAW plays.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Loop section</span></div><div class="what"><p>Drag in the ruler (the bar numbers) to mark a section in gold; Play then repeats only that part. Click the ruler once to end the loop.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Zoom</span><span class="chip">-</span><span class="chip">+</span><span class="chip">Fit</span></div><div class="what"><p>Wider or narrower tab; Fit shows the whole phrase. Also Ctrl + mouse wheel.</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Length</span></div><div class="what"><p>How many bars (1 to 512). Recording makes it longer by itself when needed.</p></div><span class="tag opt t">Optional</span></div>
+  </div>
+
+  <div class="controls">
+    <h3>Editing notes</h3>
+    <div class="row"><div class="ctl"><span class="chip">Select</span></div><div class="what"><p>Click a note; <b>Ctrl + click</b> for more; <b>drag a box</b> on an empty place; <b>Ctrl + A</b> for all. Right-click a note to delete it.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Copy</span><span class="chip">Cut</span><span class="chip">Paste</span></div><div class="what"><p>Copy or cut the selected notes, then paste them at the yellow cursor (Ctrl + C / X / V).</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">&lt;</span><span class="chip">&gt;</span></div><div class="what"><p>Move the selection one step earlier / later (Left / Right keys).</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">+1</span><span class="chip">-1</span></div><div class="what"><p>One half step higher / lower on the same string (Up / Down). <b>Shift + Up / Down</b>: the same pitch on the next string (another fingering).</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Delete note</span><span class="chip">Undo</span><span class="chip">Clear</span></div><div class="what"><p>Delete the selection (Delete key); go back one change (up to 100, Ctrl + Z); remove everything (Undo brings it back).</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">To Reharm Lab</span></div><div class="what"><p>Sends the chords of the phrase to the Reharm Lab as a progression, to try other chords. Tip: record yourself strumming a song, then press this.</p></div><span class="tag opt t">Optional</span></div>
+  </div>
+
+  <div class="controls">
+    <h3>The tab view</h3>
+    <div class="row"><div class="ctl"><span class="chip">Rows</span></div><div class="what"><p>One row per string, highest on top, like normal tab. Time goes right. Yellow line = write cursor, green = playback, gold = loop section.</p></div><span class="tag leave t">Leave alone</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Chord row</span></div><div class="what"><p>The gold chord names under the bar numbers: found from strummed chords and from arpeggios over 3+ strings. Hover a name for its notes.</p></div><span class="tag leave t">Leave alone</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Symbols</span></div><div class="what"><p>h = hammer-on · p = pull-off · t = tap · PM = palm mute · x = dead note · &lt;12&gt; = natural harmonic · PH = pinch harmonic · b2 = bend 2 half steps · pb = pre-bend · r = release · / \ = slides · ~ = vibrato.</p></div><span class="tag leave t">Leave alone</span></div>
+  </div>
+
+  <div class="controls">
+    <h3>Writing by hand (ignore these if you only record)</h3>
+    <div class="row"><div class="ctl"><span class="chip">Write mode</span></div><div class="what"><p>On: each click on the fretboard also writes the note at the cursor. Shift + click collects notes for <span class="chip">Add chord</span>.</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Step</span><span class="chip">Technique</span><span class="chip">Velocity</span></div><div class="what"><p>Length of each written note; how it is played (hammer-on, palm mute, harmonic…); how hard (1–127).</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Bend</span><span class="chip">Slide</span><span class="chip">Vibrato</span><span class="chip">Let ring</span></div><div class="what"><p>Bend shape and amount; slide type and distance; vibrato depth and speed; let the note ring until the next one on its string.</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Down strum</span><span class="chip">Strum</span><span class="chip">Add chord</span></div><div class="what"><p>Strum direction and time (0 = all at once, 10–30 ms normal); writes the Shift + clicked notes as one chord.</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Drag MIDI to DAW</span></div><div class="what"><p>Drag it onto a DAW track: the phrase arrives as a MIDI clip, with every bend and slide.</p></div><span class="tag often t">Use often</span></div>
+  </div>
+</section>
+
+<!-- ============================================================ EXPORT -->
+<section id="export">
+  <div class="head">
+    <h2>Export</h2>
+    <p>The <span class="chip">Export...</span> button in Play &amp; Write saves the phrase as a file. The usual way: record → fix by hand → export.</p>
+  </div>
+  <figure class="shot"><img src="img/m-pdf.jpg" width="1190" height="760" alt="A tab page exported as PDF"><figcaption>The PDF: title, tempo, tuning, chord names, bar numbers, "P.M. - - -" over palm-muted notes, and a legend.</figcaption></figure>
+  <div class="controls">
+    <h3>Formats</h3>
+    <div class="row"><div class="ctl"><span class="chip">MIDI (.mid)</span></div><div class="what"><p>For your DAW, with every pitch bend, slide, vibrato and keyswitch.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Text tab (.txt)</span></div><div class="what"><p>Classic <code>e|--3--5--|</code> tab with chord names, to paste into a message or forum. "Copy text tab to the clipboard" skips the file.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">PDF</span></div><div class="what"><p>A printable tab page, like a tab book.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">MusicXML</span></div><div class="what"><p>Opens in MuseScore, Guitar Pro, Sibelius and Finale as tab and notes, with chord symbols.</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Guitar Pro 3 (.gp3)</span></div><div class="what"><p>Opens directly in Guitar Pro (3 to 8), TuxGuitar and Songsterr. Up to 7 strings; GP3 has no palm mute.</p><p class="sub">New in this version: if a file does not open in your program, use MusicXML and let us know.</p></div><span class="tag opt t">Optional</span></div>
+  </div>
+</section>
+
+<!-- ============================================================ SHAPES -->
+<section id="shapes">
+  <div class="head">
+    <h2>Chord Shapes tab</h2>
+    <p>Type or pick any chord and see every way to play it on your guitar and tuning, as chord diagrams.</p>
+  </div>
+  <figure class="shot"><img src="img/14-chord-shapes-cmaj7.jpg" width="1320" height="860" alt="Chord Shapes for Cmaj7"><figcaption>Cmaj7: the usual fingerings first (gold titles), then 116 more. The chosen one is on the big neck with each note's job.</figcaption></figure>
+  <div class="controls">
+    <h3>Controls</h3>
+    <div class="row"><div class="ctl"><span class="chip">Chord</span></div><div class="what"><p>Type any chord symbol: <code>C</code>, <code>Am</code>, <code>F#m7b5</code>, <code>Bbmaj9</code>, <code>G7#9</code>, <code>E7alt</code>, <code>Dadd9</code>, <code>C6/9</code>, <code>G13(#11)</code>, <code>Cm(maj7)</code>, <code>D5</code>, <code>Bdim7</code>, <code>C-7</code>, <code>CM7</code>, <code>Cø</code>. Slash chords put a note in the bass: <code>D/F#</code>, <code>Am7/G</code>.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Root</span><span class="chip">Type</span></div><div class="what"><p>Or pick a root and one of 35 chord types; it writes the symbol for you.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Hand stretch</span></div><div class="what"><p>The most frets one shape may cover (4 = normal hand).</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Neck</span></div><div class="what"><p>Only shapes in this part of the neck (open position, frets 5–10, …).</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Strings</span></div><div class="what"><p>How many strings a shape must use (more = fuller strum, fewer = small jazz/funk shapes).</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Root lowest</span><span class="chip">Open strings</span><span class="chip">Skip a string inside</span></div><div class="what"><p>Root (or the "/" note) as the lowest note; allow open strings; allow one muted string in the middle (jazz voicings).</p></div><span class="tag opt t">Optional</span></div>
+  </div>
+  <div class="calm">
+    <p><strong>The diagrams:</strong> the thickest string is on the left; the number on the left is the fret; x = don't play, o = open. Orange dot = root, blue = other chord notes. <b>Gold title</b> = a fingering most guitarists use (open chord, barre chord on the E / A shape, D shape, jazz shape), most played first.</p>
+  </div>
+</section>
+
+<!-- ============================================================ ANALYSER -->
+<section id="analyser">
+  <div class="head">
+    <h2>Chord name (analyser)</h2>
+    <p>At the right of the tab row, Guitar Lab names the chord of whatever sounds right now: your real guitar, the fretboard, the piano, the phrase, or MIDI coming in.</p>
+  </div>
+  <div class="calm">
+    <p>It reads chords the way a music teacher does: triads and power chords, 6ths, 7ths, 9ths, 11ths and 13ths, altered chords (7♭9, 7♯9, 13♯11, 7alt), sus and add chords, slash chords ("C/E" = C with E in the bass), and voicings without a root. Hover over the name to see the notes with their jobs, and the other ways to read the same notes. It is empty in the Trainer, so it never gives answers away.</p>
+  </div>
+</section>
+
+<!-- ============================================================ REHARM -->
+<section id="reharm">
+  <div class="head">
+    <h2>Reharm Lab tab</h2>
+    <p>Chord ideas: type a progression and get new chords that fit, with shapes you can play. "To Reharm Lab" in Play &amp; Write fills it with the chords of your phrase.</p>
+  </div>
+  <figure class="shot"><img src="img/m-reharm.jpg" width="1320" height="478" alt="Reharm Lab"><figcaption>"I V vi IV" in C. Changed chords have a yellow border, with the reason under them.</figcaption></figure>
+  <div class="controls">
+    <h3>Your progression</h3>
+    <div class="row"><div class="ctl"><span class="chip">Progression</span></div><div class="what"><p>Chords with spaces between them: Roman numerals (<b>I V vi IV</b>) or names (<b>C G Am F</b>). One bar each.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Key</span><span class="chip">Major</span></div><div class="what"><p>The key of the song; numerals are read in this key.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Amount</span><span class="chip">Reharmonize</span><span class="chip">New idea</span><span class="chip">Reset</span></div><div class="what"><p>How many chords may change; build a new version; other random choices; back to yours.</p></div><span class="tag often t">Use often</span></div>
+  </div>
+  <div class="controls">
+    <h3>Kinds of change (tick the ones you want)</h3>
+    <div class="row"><div class="ctl"><span class="chip">Tritone sub</span></div><div class="what"><p>A dominant chord swapped for the one 6 half steps away (G7 → Db7).</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Secondary dominant</span></div><div class="what"><p>The "V" of the next chord before it (A7 before Dm).</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Borrowed chord</span></div><div class="what"><p>A chord from the parallel minor or major (Fm in C major).</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Passing diminished</span></div><div class="what"><p>A diminished chord between two chords; the bass walks by half steps.</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Related ii-V</span></div><div class="what"><p>The matching "ii" before a dominant (Dm7 before G7).</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Diatonic sub</span></div><div class="what"><p>A chord from the same key sharing two notes (C → Am or Em).</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Backdoor dominant</span></div><div class="what"><p>Reach the home chord from a step below (Bb7 → C).</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Extensions</span></div><div class="what"><p>Same chord, richer (C → Cmaj7 or Cmaj9).</p></div><span class="tag opt t">Optional</span></div>
+  </div>
+  <div class="controls">
+    <h3>Shapes and results</h3>
+    <div class="row"><div class="ctl"><span class="chip">Hand stretch</span><span class="chip">Neck area</span><span class="chip">Root in bass</span><span class="chip">Open strings</span></div><div class="what"><p>How the voicings are chosen, as in Chord Shapes.</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Chord cards</span><span class="chip">Next voicing</span></div><div class="what"><p>Click a card to hear it and see its shape; Next voicing shows another shape.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Suggestions</span><span class="chip">Apply suggestion</span></div><div class="what"><p>Every single change found, with a reason. Double-click one to use it.</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Send to phrase</span></div><div class="what"><p>Writes the progression into Play &amp; Write as strummed chords.</p><p class="warnline">It replaces the notes already in the phrase. Undo brings them back.</p></div><span class="tag opt t">Optional</span></div>
+  </div>
+</section>
+
+<!-- ============================================================ TRAINER -->
+<section id="trainer">
+  <div class="head">
+    <h2>Trainer tab</h2>
+    <p>Quizzes for the neck and for your ears. The neck never shows answers before you answer.</p>
+  </div>
+  <div class="two">
+    <figure class="shot"><img src="img/m-trainer.jpg" width="1320" height="480" alt="Trainer with heat map"><figcaption>The heat map: green = notes you know, red = notes you miss.</figcaption></figure>
+    <figure class="shot"><img src="img/m-ear.jpg" width="1320" height="200" alt="Ear training: chord type"><figcaption>Ear training: hear a chord, name its type.</figcaption></figure>
+  </div>
+  <div class="controls">
+    <h3>Quizzes</h3>
+    <div class="row"><div class="ctl"><span class="chip">Name the note</span></div><div class="what"><p>A dot on the neck: click its name (or a piano key).</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Find the note</span></div><div class="what"><p>A name: click every place it is, then Check.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Arpeggio tones</span></div><div class="what"><p>A chord: click every chord note, then Check.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Interval name</span></div><div class="what"><p>Two dots: name the distance from the blue up to the orange.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Ear: interval</span></div><div class="what"><p>Two notes are played, low then high (up to an octave). Name the interval.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Ear: chord type</span></div><div class="what"><p>A real guitar shape is strummed. Name its type: major, minor, 7, maj7, m7, dim, aug, sus2, sus4, half-diminished, dim7.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Ear: play it back</span></div><div class="what"><p>A note is played. Play it on your <b>real guitar</b> (turn on Guitar → MIDI), or click it on the neck or piano. Any octave counts.</p></div><span class="tag often t">Use often</span></div>
+  </div>
+  <div class="controls">
+    <h3>Controls</h3>
+    <div class="row"><div class="ctl"><span class="chip">Next</span><span class="chip">Check</span><span class="chip">Play again</span></div><div class="what"><p>A new question (answer time counts from here); check your clicks; hear an ear question again.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Strings</span><span class="chip">Frets</span></div><div class="what"><p>Only these strings and this fret range (for example the 4th string, or frets 12–24).</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Natural notes only</span><span class="chip">Drill my weak spots</span><span class="chip">Show heat map</span></div><div class="what"><p>No sharps/flats; ask your weak spots more often; colour the neck by how well you know it.</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Reset stats</span></div><div class="what"><p>Deletes all scores and the heat map.</p><p class="warnline">This cannot be undone.</p></div><span class="tag leave t">Leave alone</span></div>
+  </div>
+</section>
+
+<!-- ============================================================ MIDI / SOUND -->
+<section id="midisound">
+  <div class="head">
+    <h2>MIDI / Sound settings</h2>
+    <p>Opened with <span class="chip">MIDI / Sound...</span>. Nearly everything is fine as it is; the two that matter are <b>Pitch bend range</b> and <b>Built-in sound</b>.</p>
+  </div>
+  <div class="calm">
+    <p><strong>Why one MIDI channel per string?</strong> A MIDI cable has 16 channels, like lanes on one road. A pitch bend bends every note on its channel. So each string gets its own channel (high E = 2, B = 3 … low E = 7): bending the G string bends only the G string. Channel 1 is the "master" channel of MPE: messages for the whole instrument (sustain pedal, mod wheel, volume).</p>
+  </div>
+  <div class="two">
+    <figure class="shot"><img src="img/m-midi-sound.jpg" width="530" height="650" alt="MIDI and Sound settings"></figure>
+    <div class="controls">
+      <h3>MIDI</h3>
+      <div class="row"><div class="ctl"><span class="chip">Pitch bend range</span></div><div class="what"><p><b>Must match the bend range of the instrument that gets the MIDI</b>, or bends are out of tune. 12 is good.</p></div><span class="tag once t">Set once</span></div>
+      <div class="row"><div class="ctl"><span class="chip">Highest string channel</span></div><div class="what"><p>The channel of the high E string (2). Use 1 only for old "guitar mode" samplers that need string 1 on channel 1 (then also turn off Send MPE setup).</p></div><span class="tag leave t">Leave alone</span></div>
+      <div class="row"><div class="ctl"><span class="chip">Send MPE setup</span></div><div class="what"><p>Tells MPE instruments "one channel per string".</p></div><span class="tag leave t">Leave alone</span></div>
+      <div class="row"><div class="ctl"><span class="chip">Sync to host</span></div><div class="what"><p>The phrase plays when the DAW plays, in time.</p></div><span class="tag leave t">Leave alone</span></div>
+      <div class="row"><div class="ctl"><span class="chip">Internal tempo</span></div><div class="what"><p>Tempo when the DAW is not playing, and in the standalone app.</p></div><span class="tag opt t">Optional</span></div>
+      <div class="row"><div class="ctl"><span class="chip">Legato overlap</span><span class="chip">Legato velocity</span></div><div class="what"><p>Hammer-ons and pull-offs overlap the note before and are softer, so guitar libraries play them smoothly.</p></div><span class="tag leave t">Leave alone</span></div>
+      <div class="row"><div class="ctl"><span class="chip">MIDI thru</span><span class="chip">Click velocity</span></div><div class="what"><p>Pass incoming MIDI on; how hard clicked notes are.</p></div><span class="tag leave t">Leave alone</span></div>
+    </div>
+  </div>
+  <div class="controls">
+    <h3>Sound and keyswitches</h3>
+    <div class="row"><div class="ctl"><span class="chip">Built-in sound</span><span class="chip">Sound volume</span><span class="chip">Sound brightness</span></div><div class="what"><p>Guitar Lab's own sound on/off (same switch as on the Guitar → MIDI tab), its volume, warm or bright.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Keyswitches</span><span class="chip">Keyswitch channel</span><span class="chip">Palm mute CC</span></div><div class="what"><p>Only for guitar sample libraries that change style with special low notes or a controller. Take the values from the library's manual. "Off" sends nothing.</p></div><span class="tag leave t">Leave alone</span></div>
+  </div>
+</section>
+
+<!-- ============================================================ NECK -->
+<section id="neck">
+  <div class="head">
+    <h2>Fretboard and piano</h2>
+    <p>Always visible. They show what is sounding, and you can click them to play.</p>
+  </div>
+  <div class="two">
+    <div class="controls">
+      <h3>Mouse</h3>
+      <div class="row"><div class="ctl"><span class="chip">Click a fret</span></div><div class="what"><p>Plays that note (and sends it as MIDI).</p></div><span class="tag opt t">Optional</span></div>
+      <div class="row"><div class="ctl"><span class="chip">Hold + drag up/down</span></div><div class="what"><p>Bends the note (one string gap = one whole step).</p></div><span class="tag opt t">Optional</span></div>
+      <div class="row"><div class="ctl"><span class="chip">Hold + drag sideways</span></div><div class="what"><p>Slides along the string.</p></div><span class="tag opt t">Optional</span></div>
+      <div class="row"><div class="ctl"><span class="chip">Shift + click</span></div><div class="what"><p>Collects notes for a chord (blue rings), then Add chord in Play &amp; Write.</p></div><span class="tag opt t">Optional</span></div>
+      <div class="row"><div class="ctl"><span class="chip">Click a piano key</span></div><div class="what"><p>Plays it and shows every place that note is on the neck. Dim keys are outside your guitar's range.</p></div><span class="tag opt t">Optional</span></div>
+    </div>
+    <div class="controls">
+      <h3>Colours</h3>
+      <div class="row" style="grid-template-columns:1fr"><div class="what">
+        <ul class="colors">
+          <li><span class="dot" style="background:#5cf59a"></span><span><b>Green</b>: sounding now, also from your real guitar.</span></li>
+          <li><span class="dot" style="background:#f08a3c"></span><span><b>Orange</b>: a root note.</span></li>
+          <li><span class="dot" style="background:#7d8594"></span><span><b>Grey</b>: the other notes of the scale.</span></li>
+          <li><span class="dot" style="background:#4aa3ff"></span><span><b>Blue</b>: chord notes, or notes collected with Shift + click.</span></li>
+          <li><span class="dot" style="background:#f7c948"></span><span><b>Yellow</b>: during calibration, the spot to play next.</span></li>
+        </ul>
+      </div></div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="wrap">
+  Guitar Lab v0.3 user manual. Every control in the plugin also has its own tooltip: hold the mouse over it.
+</footer>
+
+<script>
+  // Highlight the nav chip of the section in view.
+  (function () {
+    var links = Array.prototype.slice.call(document.querySelectorAll('nav.chips a'));
+    var byId = {};
+    links.forEach(function (a) { byId[a.getAttribute('href').slice(1)] = a; });
+    if (!('IntersectionObserver' in window)) return;
+    var obs = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (!e.isIntersecting) return;
+        links.forEach(function (a) { a.classList.remove('here'); });
+        var a = byId[e.target.id];
+        if (a) {
+          a.classList.add('here');
+          var box = a.parentElement;
+          box.scrollTo({ left: a.offsetLeft - box.clientWidth / 2 + a.clientWidth / 2, behavior: 'smooth' });
+        }
+      });
+    }, { rootMargin: '-40% 0px -55% 0px' });
+    document.querySelectorAll('main section').forEach(function (s) { obs.observe(s); });
+  })();
+</script>
+</body>
+</html>

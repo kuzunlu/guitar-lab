@@ -65,9 +65,12 @@ jobs:
           New-Item -ItemType Directory -Force release | Out-Null
           Copy-Item -Recurse "build/GuitarLab_artefacts/Release/VST3/Guitar Lab.vst3" release/
           Copy-Item "build/GuitarLab_artefacts/Release/Standalone/Guitar Lab.exe" release/
+          Copy-Item -Recurse "docs/manual" release/Manual
           Compress-Archive -Path "release/*" -DestinationPath "Guitar-Lab-$env:TAG.zip"
           $installer = Get-ChildItem build/installer/*.exe | Select-Object -First 1
           $notes = @(
+            "**New here? Read the manual:** every button and setting explained, with pictures and step-by-step recipes. After installing: Start menu > **Guitar Lab Manual**, or the **Manual** button in the plugin. In the zip: ``Manual\index.html``."
+            ""
             "**Easiest:** run ``$($installer.Name)``, then rescan plugins in your DAW."
             "It installs the VST3 into ``C:\Program Files\Common Files\VST3\`` and the standalone app into ``C:\Program Files\Guitar Lab\`` (Start menu: Guitar Lab)."
             ""

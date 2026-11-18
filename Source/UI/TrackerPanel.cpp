@@ -522,6 +522,12 @@ namespace gl
         };
         addAndMakeVisible (calibrateButton);
 
+        intonationButton.setTooltip ("Intonation report\nShows, from your Full calibration, how in tune every fret of your guitar is "
+                                     "compared with its open string, and what to adjust (the bridge saddles) if the 12th fret is sharp or flat.");
+        intonationButton.onClick = [this] { intonation.show (proc.instrument, proc.calibration); };
+        addAndMakeVisible (intonationButton);
+        addChildComponent (intonation);
+
         // --- Calibration presets ---
         presetLabel.setText ("Saved calibrations", juce::dontSendNotification);
         presetLabel.setJustificationType (juce::Justification::centredRight);
@@ -819,6 +825,7 @@ namespace gl
         put (b, monitorToggle, 110);
         put (b, soundToggle, 130);
         put (b, calibrateButton, 110);
+        put (b, intonationButton, 100);
         calStatus.setBounds (b);
 
         auto c = row();
@@ -830,5 +837,6 @@ namespace gl
         help.setBounds (row (20));
         tuner.setBounds (r);
         wizard.setBounds (getLocalBounds().reduced (20, 10));
+        intonation.setBounds (getLocalBounds().reduced (10));
     }
 }

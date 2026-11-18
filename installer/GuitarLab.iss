@@ -40,9 +40,12 @@ Name: "desktopicon"; Description: "Create a desktop shortcut for the standalone 
 [Files]
 Source: "{#BuildDir}\VST3\Guitar Lab.vst3\*"; DestDir: "{commoncf64}\VST3\Guitar Lab.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#BuildDir}\Standalone\Guitar Lab.exe"; DestDir: "{app}"; Flags: ignoreversion
+; The user manual (opened by the Manual button and the Start menu)
+Source: "..\docs\manual\*"; DestDir: "{app}\Manual"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\Guitar Lab"; Filename: "{app}\Guitar Lab.exe"
+Name: "{group}\Guitar Lab Manual"; Filename: "{app}\Manual\index.html"
 Name: "{autodesktop}\Guitar Lab"; Filename: "{app}\Guitar Lab.exe"; Tasks: desktopicon
 
 [Run]
@@ -50,3 +53,4 @@ Filename: "{app}\Guitar Lab.exe"; Description: "Start the Guitar Lab standalone 
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{commoncf64}\VST3\Guitar Lab.vst3"
+Type: filesandordirs; Name: "{app}\Manual"

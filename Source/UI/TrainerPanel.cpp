@@ -15,11 +15,19 @@ namespace gl
             "Name the note: a dot appears on the neck. Click the note name (or a piano key).\n"
             "Find the note: a note name is shown. Click EVERY place it appears in the chosen strings and frets, then press Check.\n"
             "Arpeggio tones: a chord is shown. Click every chord tone in the chosen area, then press Check.\n"
-            "Interval name: two dots appear. Name the distance from the blue dot up to the orange dot.");
+            "Interval name: two dots appear. Name the distance from the blue dot up to the orange dot.\n"
+            "EAR TRAINING (nothing is shown until you answer; press 'Play again' to hear it again):\n"
+            "Ear: interval: two notes are played, low then high. Name the interval.\n"
+            "Ear: chord type: a chord is strummed (a real guitar shape). Name its type (major, minor, 7th, ...).\n"
+            "Ear: play it back: a note is played. Play the same note on your REAL guitar (turn on Guitar -> MIDI), "
+            "or click it on the neck or the piano. Any octave counts.");
         modeBox.addItem ("Name the note", 1);
         modeBox.addItem ("Find the note", 2);
         modeBox.addItem ("Arpeggio tones", 3);
         modeBox.addItem ("Interval name", 4);
+        modeBox.addItem ("Ear: interval", 5);
+        modeBox.addItem ("Ear: chord type", 6);
+        modeBox.addItem ("Ear: play it back", 7);
         modeBox.setSelectedId (1, juce::dontSendNotification);
         modeBox.setTooltip (modeLabel.getTooltip());
         modeBox.onChange = [this] { updateAnswerButtons(); nextQuestion(); };
@@ -81,13 +89,18 @@ namespace gl
         };
         addAndMakeVisible (resetButton);
 
+        replayButton.setTooltip ("Play again\nPlays the question once more (ear training).");
+        replayButton.onClick = [this] { playQuestion(); };
+        addAndMakeVisible (replayButton);
+
         for (int i = 0; i < 12; ++i)
         {
             auto* b = answerButtons.add (new juce::TextButton());
             b->onClick = [this, i]
             {
-                if (mode() == QuizMode::IntervalName) answerInterval (i);
-                else                                  answerName (i);
+                if (mode() == QuizMode::IntervalName || mode() == QuizMode::EarInterval) answerInterval (i);
+                else if (mode() == QuizMode::EarChord)                                    answerChord (i);
+                else                                                                      answerName (i);
             };
             addAndMakeVisible (b);
         }
@@ -145,27 +158,80 @@ namespace gl
 
     void TrainerPanel::updateAnswerButtons()
     {
-        const bool intervals = mode() == QuizMode::IntervalName;
-        const bool names = mode() == QuizMode::NameTheNote;
+        const bool intervals = mode() == QuizMode::IntervalName || mode() == QuizMode::EarInterval;
+        const bool names = mode() == QuizMode::NameTheNote || mode() == QuizMode::EarPlayBack;
+        const bool chords = mode() == QuizMode::EarChord;
+        const auto& qualities = earChordQualities();
 
         for (int i = 0; i < 12; ++i)
         {
             auto* b = answerButtons[i];
+            bool visible = intervals || names;
             if (intervals)
             {
-                b->setButtonText (juce::String (intervalName (i)));
-                b->setTooltip ("Answer: " + juce::String (intervalName (i)) + " (" + juce::String (i) + " half steps)");
+                // Ear intervals go up to the octave: the first button means "octave" there.
+                const juce::String name = (i == 0 && mode() == QuizMode::EarInterval) ? juce::String ("octave") : juce::String (intervalName (i));
+                b->setButtonText (name);
+                b->setTooltip ("Answer: " + name + " (" + juce::String (i == 0 && mode() == QuizMode::EarInterval ? 12 : i) + " half steps)");
+            }
+            else if (chords)
+            {
+                visible = i < (int) qualities.size();
+                if (visible)
+                {
+                    b->setButtonText (juce::String (chordQualityName (qualities[(size_t) i])));
+                    b->setTooltip ("Answer: " + b->getButtonText() + " chord");
+                }
             }
             else
             {
                 b->setButtonText (juce::String (pitchClassName (i, false)) + (pitchClassName (i, false) != pitchClassName (i, true)
                                   ? "/" + juce::String (pitchClassName (i, true)) : juce::String()));
-                b->setTooltip ("Answer: " + b->getButtonText() + "\nYou can also click a piano key with this note name.");
+                b->setTooltip ("Answer: " + b->getButtonText() + "\nYou can also click a piano key with this note name"
+                               + juce::String (mode() == QuizMode::EarPlayBack ? ", a spot on the neck, or play it on your guitar." : "."));
             }
-            b->setVisible (intervals || names);
+            b->setVisible (visible);
         }
-        checkButton.setVisible (! intervals && ! names);
+        checkButton.setVisible (! intervals && ! names && ! chords);
+        replayButton.setVisible (isEarQuiz (mode()));
         resized();
+    }
+
+    void TrainerPanel::playQuestion()
+    {
+        if (! question) return;
+        // Chords are strummed (40 ms between strings), intervals are played one note after the other.
+        const int token = ++playToken;
+        juce::Component::SafePointer<TrainerPanel> safe (this);
+        const bool together = question->playTogether;
+        const auto spots = question->shown;
+        int delay = 0;
+        for (size_t i = 0; i < spots.size(); ++i)
+        {
+            const auto p = spots[i];
+            juce::Timer::callAfterDelay (delay, [safe, token, p]
+            {
+                if (safe != nullptr && safe->playToken == token) safe->proc.liveNoteOn (p.string, p.fret);
+            });
+            const int length = together ? 1400 : 650;
+            juce::Timer::callAfterDelay (delay + length, [safe, token, p]
+            {
+                if (safe != nullptr && safe->playToken == token) safe->proc.liveNoteOff (p.string);
+            });
+            delay += together ? 40 : 700;
+        }
+        ignoreUntil = juce::Time::getMillisecondCounterHiRes() + delay + (together ? 1500 : 700);
+    }
+
+    void TrainerPanel::heard (const std::set<MidiNote>& sounding)
+    {
+        // "Ear: play it back": a new note from the guitar (or the DAW) answers the question.
+        std::set<MidiNote> fresh;
+        for (auto n : sounding) if (! lastHeard.count (n)) fresh.insert (n);
+        lastHeard = sounding;
+        if (! question || answered || question->mode != QuizMode::EarPlayBack || fresh.empty()) return;
+        if (juce::Time::getMillisecondCounterHiRes() < ignoreUntil) return;
+        answerName (pitchClassOf (*fresh.begin()));
     }
 
     double TrainerPanel::secondsSinceAsked() const
@@ -187,14 +253,17 @@ namespace gl
         feedbackLabel.setText ({}, juce::dontSendNotification);
         nextButton.setButtonText ("Next");
 
-        // Play the shown note(s), so you also train your ear.
-        for (auto p : question->shown)
-        {
-            proc.liveNoteOn (p.string, p.fret);
-            const int s = p.string;
-            juce::Component::SafePointer<TrainerPanel> safe (this);
-            juce::Timer::callAfterDelay (700, [safe, s] { if (safe != nullptr) safe->proc.liveNoteOff (s); });
-        }
+        // Play the shown note(s), so you also train your ear (ear quizzes: strummed or one after another).
+        if (isEarQuiz (question->mode))
+            playQuestion();
+        else
+            for (auto p : question->shown)
+            {
+                proc.liveNoteOn (p.string, p.fret);
+                const int s = p.string;
+                juce::Component::SafePointer<TrainerPanel> safe (this);
+                juce::Timer::callAfterDelay (700, [safe, s] { if (safe != nullptr) safe->proc.liveNoteOff (s); });
+            }
 
         if (onDisplayChanged) onDisplayChanged();
     }
@@ -218,16 +287,25 @@ namespace gl
 
     void TrainerPanel::answerName (PitchClass pc)
     {
-        if (! question || answered || question->mode != QuizMode::NameTheNote) return;
+        if (! question || answered || (question->mode != QuizMode::NameTheNote && question->mode != QuizMode::EarPlayBack)) return;
         const bool ok = proc.trainer.answerPitchClass (*question, pc, secondsSinceAsked());
-        showResult (ok, "It is " + juce::String (pitchClassName (question->targetPc)) + ".");
+        showResult (ok, (question->mode == QuizMode::EarPlayBack && ! ok ? "You played " + juce::String (pitchClassName (pc)) + ". " : juce::String())
+                        + "It is " + juce::String (pitchClassName (question->targetPc)) + ".");
     }
 
     void TrainerPanel::answerInterval (int semitones)
     {
-        if (! question || answered || question->mode != QuizMode::IntervalName) return;
+        if (! question || answered || (question->mode != QuizMode::IntervalName && question->mode != QuizMode::EarInterval)) return;
         const bool ok = proc.trainer.answerInterval (*question, semitones, secondsSinceAsked());
-        showResult (ok, "It is a " + juce::String (intervalName (question->interval)) + ".");
+        showResult (ok, "It is " + juce::String (question->interval == 12 ? "an octave" : "a " + juce::String (intervalName (question->interval))) + ".");
+    }
+
+    void TrainerPanel::answerChord (int index)
+    {
+        const auto& qualities = earChordQualities();
+        if (! question || answered || question->mode != QuizMode::EarChord || index < 0 || index >= (int) qualities.size()) return;
+        const bool ok = proc.trainer.answerChordQuality (*question, qualities[(size_t) index], secondsSinceAsked());
+        showResult (ok, "It is " + juce::String (question->chord.name()) + " (" + juce::String (chordQualityName (question->chord.quality)) + ").");
     }
 
     void TrainerPanel::checkPositions()
@@ -254,6 +332,11 @@ namespace gl
         liveString = pos.string;
 
         if (! question || answered) return;
+        if (question->mode == QuizMode::EarPlayBack)
+        {
+            answerName (pitchClassOf (proc.instrument.noteAt (pos)));
+            return;
+        }
         if (question->mode == QuizMode::FindTheNote || question->mode == QuizMode::ArpeggioTones)
         {
             auto it = std::find (clicked.begin(), clicked.end(), pos);
@@ -271,7 +354,7 @@ namespace gl
 
     void TrainerPanel::pianoPressed (MidiNote note)
     {
-        if (question && question->mode == QuizMode::NameTheNote)
+        if (question && (question->mode == QuizMode::NameTheNote || question->mode == QuizMode::EarPlayBack))
             answerName (pitchClassOf (note));
     }
 
@@ -279,6 +362,15 @@ namespace gl
     {
         std::vector<FretboardComponent::Mark> m;
         if (! question) return m;
+
+        // Ear training: nothing on the neck until you answer, then where the notes were.
+        if (isEarQuiz (question->mode))
+        {
+            if (answered)
+                for (size_t i = 0; i < question->shown.size(); ++i)
+                    m.push_back ({ question->shown[i], i + 1 == question->shown.size() ? theme::root : theme::chordTone, {}, true });
+            return m;
+        }
 
         // Question dots. For Name and Interval questions the name must stay hidden: label "?".
         for (size_t i = 0; i < question->shown.size(); ++i)
@@ -316,7 +408,8 @@ namespace gl
         put (a, modeLabel, 36);
         put (a, modeBox, 160);
         put (a, nextButton, 80);
-        put (a, checkButton, 80);
+        if (checkButton.isVisible())  put (a, checkButton, 80);
+        if (replayButton.isVisible()) put (a, replayButton, 90);
         put (a, naturalsToggle, 150);
         put (a, adaptiveToggle, 160);
         put (a, heatToggle, 130);
@@ -334,7 +427,7 @@ namespace gl
         feedbackLabel.setBounds (row (26));
 
         auto c = row (30);
-        const bool intervals = mode() == QuizMode::IntervalName;
+        const bool intervals = mode() == QuizMode::IntervalName || mode() == QuizMode::EarInterval || mode() == QuizMode::EarChord;
         const int w = intervals ? 100 : 66;
         for (auto* btn : answerButtons)
             if (btn->isVisible()) put (c, *btn, w);

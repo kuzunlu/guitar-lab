@@ -3,6 +3,7 @@
 #include "PluginProcessor.h"
 #include "Tracking/Calibration.h"
 #include "UI/FretboardComponent.h"
+#include "UI/IntonationView.h"
 #include "UI/Theme.h"
 
 namespace gl
@@ -109,7 +110,8 @@ namespace gl
         juce::Slider safety, sensitivity;
         juce::ToggleButton bendsToggle { "Track bends / slides / vibrato" }, monitorToggle { "Hear guitar" },
                            soundToggle { "Built-in sound" };
-        juce::TextButton calibrateButton { "Calibrate..." };
+        juce::TextButton calibrateButton { "Calibrate..." }, intonationButton { "Intonation..." };
+        IntonationView intonation;
 
         TunerView tuner;
         CalibrationWizard wizard;

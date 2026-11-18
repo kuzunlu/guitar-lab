@@ -36,6 +36,7 @@ namespace ParamIDs
     inline constexpr auto trackSensitivity = "trackSensitivity";
     inline constexpr auto trackBends       = "trackBends";
     inline constexpr auto trackMonitor     = "trackMonitor";
+    inline constexpr auto metronome        = "metronome";
 }
 
 class GuitarLabProcessor : public juce::AudioProcessor,
@@ -97,6 +98,15 @@ public:
     void setInternalPlaying (bool shouldPlay);
     bool isInternalPlaying() const { return internalPlaying.load(); }
 
+    // Loop one section of the phrase while Guitar Lab's own Play runs (beats). loopEnd <= loopStart = whole phrase.
+    std::atomic<double> loopStart { 0.0 }, loopEnd { 0.0 };
+
+    // One bar of metronome clicks, then Play starts at startBeat; with thenRecord, Record guitar starts with it.
+    void startCountIn (double startBeat, bool thenRecord);
+    void cancelCountIn() { countingIn = false; }
+    bool isCountingIn() const { return countingIn.load(); }
+    std::atomic<int> countInBeat { 0 };  // 1..4 while counting in (for the display)
+
     // --- Read by the UI to draw what is sounding ---
     std::atomic<double> playheadBeat { -1.0 };
     std::array<std::atomic<int>,   gl::kMaxStrings> soundingFret {};  // -1 = silent
@@ -133,6 +143,16 @@ private:
     double renderBpm() const;
 
     void emitPhrase (juce::MidiBuffer& out, double ppqStart, double ppqEnd, double samplesPerBeat, int numSamples);
+
+    // Metronome clicks (audio thread): short beeps, higher on the first beat of a bar.
+    struct ClickPlan { int count = 0; std::array<int, 16> at {}; std::array<bool, 16> accent {}; };
+    void addClicks (ClickPlan& plan, double fromBeat, double toBeat, double samplesPerBeat, double beatOffset) const;
+    void renderClicks (juce::AudioBuffer<float>& audio, const ClickPlan& plan);
+    int    clickLeft = 0, clickTotal = 1;
+    double clickPhase = 0.0, clickFreq = 1000.0;
+    std::atomic<bool> countingIn { false }, countInReset { false }, countInRecord { false };
+    std::atomic<double> countInStart { 0.0 };
+    double countInClock = 0.0;
     void allNotesOff (juce::MidiBuffer& out, int samplePos);
     void track (const juce::MidiMessage& m);
 

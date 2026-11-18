@@ -82,6 +82,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout GuitarLabProcessor::createLa
                     NormalisableRange<float> (0.25f, 4.0f, 0.01f, 0.5f), 1.0f));
     layout.add (std::make_unique<AudioParameterBool>   (ParameterID { ParamIDs::trackBends, 1 },    "Track bends", true));
     layout.add (std::make_unique<AudioParameterBool>   (ParameterID { ParamIDs::trackMonitor, 1 },  "Hear guitar", false));
+    layout.add (std::make_unique<AudioParameterBool>   (ParameterID { ParamIDs::metronome, 1 },     "Metronome", false));
     return layout;
 }
 
@@ -261,6 +262,48 @@ void GuitarLabProcessor::liveBend (int string, double semitones)
     liveRaw (juce::MidiMessage::pitchWheel (ch, gl::pitchBendValue (semitones, midiSettings.bendRange)));
 }
 
+void GuitarLabProcessor::startCountIn (double startBeat, bool thenRecord)
+{
+    countInStart = startBeat;
+    countInRecord = thenRecord;
+    countInReset = true; // the audio thread restarts its count-in clock
+    countingIn = true;
+}
+
+void GuitarLabProcessor::addClicks (ClickPlan& plan, double fromBeat, double toBeat, double samplesPerBeat, double beatOffset) const
+{
+    // One click on every whole beat in [fromBeat, toBeat). beatOffset: beat 0 of the bar (for the accent).
+    for (double b = std::ceil (fromBeat - 1e-9); b < toBeat && plan.count < (int) plan.at.size(); b += 1.0)
+    {
+        plan.at[(size_t) plan.count] = (int) ((b - fromBeat) * samplesPerBeat);
+        plan.accent[(size_t) plan.count] = std::abs (std::fmod (b - beatOffset, 4.0)) < 1e-6;
+        ++plan.count;
+    }
+}
+
+void GuitarLabProcessor::renderClicks (juce::AudioBuffer<float>& audio, const ClickPlan& plan)
+{
+    const int numSamples = audio.getNumSamples();
+    int next = 0;
+    for (int i = 0; i < numSamples; ++i)
+    {
+        while (next < plan.count && plan.at[(size_t) next] <= i)
+        {
+            clickTotal = clickLeft = (int) (currentSampleRate * 0.03);
+            clickFreq = plan.accent[(size_t) next] ? 1760.0 : 1100.0;
+            clickPhase = 0.0;
+            ++next;
+        }
+        if (clickLeft <= 0) continue;
+        const float env = (float) clickLeft / (float) clickTotal;
+        const float v = (float) std::sin (clickPhase) * 0.3f * env * env;
+        clickPhase += 2.0 * juce::MathConstants<double>::pi * clickFreq / currentSampleRate;
+        --clickLeft;
+        for (int ch = 0; ch < audio.getNumChannels(); ++ch)
+            audio.addSample (ch, i, v);
+    }
+}
+
 void GuitarLabProcessor::setInternalPlaying (bool shouldPlay)
 {
     if (shouldPlay && ! internalPlaying.load())
@@ -378,6 +421,34 @@ void GuitarLabProcessor::processBlock (juce::AudioBuffer<float>& audio, juce::Mi
         }
     }
 
+    // --- Count-in: one bar of clicks, then Guitar Lab's own Play starts (and recording, if asked) ---
+    ClickPlan clicks;
+    if (countingIn.load())
+    {
+        if (countInReset.exchange (false)) countInClock = 0.0;
+        const double spb = currentSampleRate * 60.0 / std::max (1.0, bpm);
+        const double from = countInClock, to = countInClock + numSamples / spb;
+        addClicks (clicks, from, std::min (to, 4.0), spb, 0.0);
+        countInClock = to;
+        countInBeat = std::clamp ((int) std::floor (from) + 1, 1, 4);
+        if (to >= 4.0)
+        {
+            countingIn = false;
+            countInBeat = 0;
+            internalPpq = countInStart.load();
+            internalPlaying = true;
+            if (countInRecord.load()) recordingGuitar = true;
+        }
+    }
+
+    // --- Loop a section (Guitar Lab's own Play only; the DAW has its own loop) ---
+    if (internalPlaying.load() && ! (sync && hostPlaying))
+    {
+        const double ls = loopStart.load(), le = loopEnd.load();
+        if (le > ls + 1e-6 && (internalPpq >= le - 1e-9 || internalPpq < ls - 1e-9))
+            internalPpq = ls;
+    }
+
     bool playing = false;
     double ppqStart = 0.0;
     if (sync && hostPlaying)       { playing = true; ppqStart = hostPpq; }
@@ -385,6 +456,9 @@ void GuitarLabProcessor::processBlock (juce::AudioBuffer<float>& audio, juce::Mi
 
     const double samplesPerBeat = currentSampleRate * 60.0 / std::max (1.0, bpm);
     const double ppqEnd = ppqStart + numSamples / samplesPerBeat;
+
+    if (playing && params.getRawParameterValue (ParamIDs::metronome)->load() > 0.5f)
+        addClicks (clicks, ppqStart, ppqEnd, samplesPerBeat, 0.0);
 
     juce::MidiBuffer out;
 
@@ -491,6 +565,9 @@ void GuitarLabProcessor::processBlock (juce::AudioBuffer<float>& audio, juce::Mi
         synth.setBrightness (params.getRawParameterValue (ParamIDs::synthTone)->load());
         synth.render (audio, out);
     }
+
+    // --- Metronome / count-in clicks ---
+    renderClicks (audio, clicks);
 
     // --- Hear the guitar itself (mixed to mono, sent to every output channel) ---
     if (numIn > 0 && params.getRawParameterValue (ParamIDs::trackMonitor)->load() > 0.5f)

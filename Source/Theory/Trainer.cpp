@@ -1,4 +1,5 @@
 #include "Theory/Trainer.h"
+#include "Theory/Voicing.h"
 
 #include <algorithm>
 #include <sstream>
@@ -203,6 +204,73 @@ namespace gl
                 q.prompt = "Name the interval from the blue dot up to the orange dot";
                 break;
             }
+
+            case QuizMode::EarInterval:
+            {
+                // Two notes, low then high (up to an octave), close together on the neck. Only heard, not shown.
+                const auto a = pickSpot();
+                std::vector<FretPos> near;
+                for (int s = 0; s < inst.numStrings(); ++s)
+                    for (int f = std::max (0, a.fret - 5); f <= std::min (kNumFrets, a.fret + 5); ++f)
+                    {
+                        const FretPos b { s, f };
+                        const int d = inst.noteAt (b) - inst.noteAt (a);
+                        if (d >= 1 && d <= 12) near.push_back (b);
+                    }
+                FretPos b = a;
+                if (! near.empty())
+                {
+                    std::uniform_int_distribution<size_t> pick (0, near.size() - 1);
+                    b = near[pick (rng)];
+                }
+                q.shown = { a, b };
+                q.interval = inst.noteAt (b) - inst.noteAt (a);
+                q.playTogether = false;
+                q.prompt = "Listen: which interval is it? (the low note first, then the high one)";
+                break;
+            }
+
+            case QuizMode::EarChord:
+            {
+                // A real chord shape, strummed, built on a spot from the chosen area.
+                const auto p = pickSpot();
+                const auto& qualities = earChordQualities();
+                std::uniform_int_distribution<size_t> pick (0, qualities.size() - 1);
+                q.chord = { pitchClassOf (inst.noteAt (p)), qualities[pick (rng)] };
+                VoicingOptions opt;
+                opt.minStrings = 3;
+                opt.minFret = std::max (0, focus_.minFret);
+                opt.maxFret = std::max (opt.minFret + 4, focus_.maxFret);
+                auto found = findVoicings (q.chord, inst, opt, 8);
+                if (found.empty())
+                {
+                    opt.minFret = 0;
+                    opt.maxFret = kNumFrets;
+                    found = findVoicings (q.chord, inst, opt, 8);
+                }
+                if (! found.empty())
+                {
+                    std::uniform_int_distribution<size_t> v (0, found.size() - 1);
+                    for (auto pos : found[v (rng)].positions()) q.shown.push_back (pos);
+                    // Lowest note last (answerChordQuality records it as the root spot)
+                    std::sort (q.shown.begin(), q.shown.end(), [this] (FretPos x, FretPos y) { return inst.noteAt (x) > inst.noteAt (y); });
+                }
+                else
+                    q.shown = { p };
+                q.playTogether = true;
+                q.prompt = "Listen: what kind of chord is it?";
+                break;
+            }
+
+            case QuizMode::EarPlayBack:
+            {
+                const auto p = pickSpot();
+                q.shown = { p };
+                q.targetPc = pitchClassOf (inst.noteAt (p));
+                q.playTogether = true;
+                q.prompt = "Listen, then play the same note on your guitar (or click it on the neck or the piano)";
+                break;
+            }
         }
         return q;
     }
@@ -215,9 +283,46 @@ namespace gl
         return ok;
     }
 
+    const std::vector<ChordQuality>& earChordQualities()
+    {
+        static const std::vector<ChordQuality> q {
+            ChordQuality::Major, ChordQuality::Minor, ChordQuality::Dominant7, ChordQuality::Major7, ChordQuality::Minor7,
+            ChordQuality::Diminished, ChordQuality::Augmented, ChordQuality::Sus2, ChordQuality::Sus4,
+            ChordQuality::HalfDiminished7, ChordQuality::Diminished7
+        };
+        return q;
+    }
+
+    std::string chordQualityName (ChordQuality q)
+    {
+        switch (q)
+        {
+            case ChordQuality::Major:           return "major";
+            case ChordQuality::Minor:           return "minor";
+            case ChordQuality::Dominant7:       return "dominant 7th";
+            case ChordQuality::Major7:          return "major 7th";
+            case ChordQuality::Minor7:          return "minor 7th";
+            case ChordQuality::Diminished:      return "diminished";
+            case ChordQuality::Augmented:       return "augmented";
+            case ChordQuality::Sus2:            return "sus2";
+            case ChordQuality::Sus4:            return "sus4";
+            case ChordQuality::HalfDiminished7: return "half-diminished";
+            case ChordQuality::Diminished7:     return "diminished 7th";
+            default:                            return "other";
+        }
+    }
+
+    bool Trainer::answerChordQuality (const Question& q, ChordQuality answer, double seconds)
+    {
+        const bool ok = answer == q.chord.quality;
+        if (! q.shown.empty())
+            record (q.shown.back(), ok, seconds); // the lowest note = the root
+        return ok;
+    }
+
     bool Trainer::answerInterval (const Question& q, int semitones, double seconds)
     {
-        const bool ok = wrap12 (semitones) == q.interval;
+        const bool ok = wrap12 (semitones) == wrap12 (q.interval);
         if (! q.shown.empty())
             record (q.shown.front(), ok, seconds);
         return ok;

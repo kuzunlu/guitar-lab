@@ -4,6 +4,8 @@
 #include "UI/FretboardComponent.h"
 #include "UI/Theme.h"
 
+#include <set>
+
 namespace gl
 {
     class TrainerPanel : public juce::Component
@@ -17,6 +19,9 @@ namespace gl
         void fretPressed (FretPos pos);
         void fretReleased();
         void pianoPressed (MidiNote note);
+
+        // Notes sounding now (the editor calls this ~30 times a second): "Ear: play it back" listens to your guitar.
+        void heard (const std::set<MidiNote>& sounding);
 
         std::vector<FretboardComponent::Mark> marks() const;
         bool showHeatMap() const { return heatToggle.getToggleState(); }
@@ -33,6 +38,8 @@ namespace gl
         void nextQuestion();
         void answerName (PitchClass pc);
         void answerInterval (int semitones);
+        void answerChord (int index);
+        void playQuestion();
         void checkPositions();
         void showResult (bool ok, const juce::String& detail);
         void updateScore();
@@ -47,7 +54,7 @@ namespace gl
         juce::Slider minFret, maxFret;
         juce::ToggleButton naturalsToggle { "Natural notes only" }, adaptiveToggle { "Drill my weak spots" },
                            heatToggle { "Show heat map" };
-        juce::TextButton nextButton { "Start" }, checkButton { "Check" }, resetButton { "Reset stats" };
+        juce::TextButton nextButton { "Start" }, checkButton { "Check" }, resetButton { "Reset stats" }, replayButton { "Play again" };
         juce::OwnedArray<juce::TextButton> answerButtons; // 12 notes or 12 intervals
 
         std::optional<Question> question;
@@ -55,5 +62,8 @@ namespace gl
         bool answered = false;
         double askedAt = 0.0;
         int liveString = -1;
+        int playToken = 0;
+        double ignoreUntil = 0.0;          // the question's own notes are not an answer
+        std::set<MidiNote> lastHeard;
     };
 }

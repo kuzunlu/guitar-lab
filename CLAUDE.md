@@ -15,14 +15,18 @@ Tab order (= the `Tab` enum in `PluginEditor.h`, = the `addTab` order):
    Calibrations can be saved and loaded as **presets** (files, shared by all projects).
 2. **Play & Write** – play the neck live (drag = bend / slide) and write MIDI phrases (up to 512 bars) with
    hammer-ons, pull-offs, taps, palm mute, dead notes, harmonics, bends, slides, vibrato and strummed chords.
-   **Record guitar** writes the tracked notes into the phrase as editable tab (`PhraseRecorder`).
+   **Record guitar** writes the tracked notes into the phrase as editable tab (`PhraseRecorder`), with an optional
+   1-bar count-in. Practice/edit tools: loop a section (drag in the ruler), metronome, zoom, multi-select
+   (Ctrl + click, box drag), copy/cut/paste, move/transpose with buttons or keys. Export: MIDI, text tab, PDF,
+   MusicXML (`Midi/TabExport`).
 3. **Chord Shapes** – type or pick any chord symbol (`Cmaj7`, `F#m7b5`, `G7#9`, `D/F#`, `E7alt`) and see every
    playable shape for this tuning as chord diagrams (`parseChordName` + `findShapes`).
 4. **Reharm Lab** – type a progression (`I V vi IV`, `Dm7 G7 Cmaj7`), get substitutions
    (tritone sub, secondary dominant, borrowed chord, passing diminished, related ii-V, diatonic sub,
    backdoor dominant, extensions) with playable, voice-led voicings.
 5. **Trainer** – note-name, find-the-note, arpeggio and interval quizzes, focused on chosen strings
-   and frets, weighted toward the player's weak spots, with a heat map.
+   and frets, weighted toward the player's weak spots, with a heat map. Ear training: interval, chord type, and
+   "play it back" (answered with the real guitar through tracking, or a click).
 
 ## Build
 
@@ -64,7 +68,7 @@ Inno Setup is not installed on the dev machine; CI installs it. Do not install i
 | Folder | What | Depends on JUCE? |
 |---|---|---|
 | `Source/Theory/` | Notes, instrument + tunings, chords + Roman numerals, reharm engine, voicing search (`findVoicings`, `findShapes` for any note set), trainer logic, `ChordFinder` (notes -> chord names, chord symbol -> notes) | **No** |
-| `Source/Midi/` | `Phrase` (the note/technique model), `MidiRenderer` (phrase -> MIDI events), `PhraseRecorder` (tracked MIDI -> phrase notes) | **No** |
+| `Source/Midi/` | `Phrase` (the note/technique model), `MidiRenderer` (phrase -> MIDI events), `PhraseRecorder` (tracked MIDI -> phrase notes), `TabExport` (tab text for a note; text tab, PDF and MusicXML files) | **No** |
 | `Source/Tracking/` | `PitchDetector` (YIN on a downsampled copy), `Spectrum` (FFT, tone colour, chroma), `Calibration` + `CalibrationSession` (wizard logic), `GuitarTracker` (audio -> notes/bends/velocity/chords; runs `PolyTracker` in poly mode) | **No** |
 | `Source/Audio/` | `PluckSynth`: small built-in plucked-string sound (one voice per MIDI channel) | Yes |
 | `Source/UI/` | Fretboard, piano, top bar, the five tab panels (`ShapesPanel` = Chord Shapes), theme + tooltip look | Yes |
@@ -152,6 +156,18 @@ Keep `Theory/`, `Midi/` and `Tracking/` free of JUCE, so they stay testable and 
   text. Loading one also switches the instrument to `cal.tuning` (through `InstrumentBar::applyTuning`).
   No pop-up windows in the plugin (some hosts handle them badly): the name box and the two-click Delete are
   in the tab itself.
+- **Tab export (`Midi/TabExport`)**: `noteTabText` is THE tab notation (the tab view uses it too). Exports lay notes
+  on a grid of 16ths (or triplets, only when notes really sit on triplets); the notes of one strummed chord (same
+  `group`) are written in one column. The PDF is written by our own tiny writer (standard Helvetica fonts, lines,
+  white boxes, text; no library): bars get the width their notes need and lines are stretched to the page; palm
+  mute is "P.M. - - -" above the staff. Guitar Pro (.gp) is not written: Guitar Pro imports the MusicXML.
+- **Practice tools in the processor:** `loopStart` / `loopEnd` (beats, atomics) loop Guitar Lab's own Play;
+  `startCountIn()` plays one bar of clicks, then starts Play at the given bar and (for Record guitar) sets
+  `recordingGuitar` in the same block, so the recording uses the transport clock. The metronome is the
+  `metronome` parameter; clicks are mixed into the audio output only (never MIDI).
+- Ear quizzes (`QuizMode::Ear*`) hide every dot until answered. "Play it back" is answered by
+  `TrainerPanel::heard()` (the editor passes the sounding notes each tick while the Trainer tab is open);
+  `ignoreUntil` skips the question's own notes.
 - Full calibration measures soft/hard per string (`stringSoft` / `stringHard`, saved as `D` lines);
   `velocityFromPeak (peak, string)` uses them when present. Old files without `D` lines still load.
 - Plugin state (tuning, phrase, trainer stats, reharm input, keyswitches) is saved as plain text inside the

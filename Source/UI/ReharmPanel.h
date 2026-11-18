@@ -36,6 +36,7 @@ namespace gl
         ReharmPanel (GuitarLabProcessor& p, FretboardComponent& board, PianoComponent& piano);
 
         void refresh();                 // after the instrument changed or a project was loaded
+        void setProgression (const juce::String& text) { input.setText (text, juce::dontSendNotification); parseInput(); }
         std::vector<FretboardComponent::Mark> marks() const;
         std::map<PitchClass, juce::Colour> chordLayer() const; // for the piano
 

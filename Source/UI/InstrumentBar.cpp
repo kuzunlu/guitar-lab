@@ -307,6 +307,21 @@ namespace gl
         midiButton.onClick = [this] { showMidiSettings(); };
         addAndMakeVisible (midiButton);
 
+        manualButton.setTooltip ("Manual\nOpens the Guitar Lab user manual in your web browser: every button and setting explained, "
+                                 "with pictures and step-by-step recipes (practice, playing a synth with your guitar, writing tab).");
+        manualButton.onClick = []
+        {
+            // The installer puts the manual next to the app; the zip has it next to Guitar Lab.exe. Else: online.
+            const juce::File candidates[] = {
+                juce::File::getSpecialLocation (juce::File::globalApplicationsDirectory).getChildFile ("Guitar Lab/Manual/index.html"),
+                juce::File::getSpecialLocation (juce::File::currentExecutableFile).getSiblingFile ("Manual").getChildFile ("index.html"),
+            };
+            for (const auto& f : candidates)
+                if (f.existsAsFile()) { f.startAsProcess(); return; }
+            juce::URL ("https://github.com/kuzunlu/guitar-lab/releases/latest").launchInDefaultBrowser(); // the zip has the manual
+        };
+        addAndMakeVisible (manualButton);
+
        #ifndef GUITAR_LAB_VERSION
         #define GUITAR_LAB_VERSION "dev"
        #endif
@@ -465,6 +480,8 @@ namespace gl
             }
 
         midiButton.setBounds (bottom.removeFromRight (130));
+        bottom.removeFromRight (6);
+        manualButton.setBounds (bottom.removeFromRight (70));
         versionLabel.setBounds (bottom.removeFromRight (150));
         scaleLabel.setBounds (bottom.removeFromLeft (76));
         scaleRootBox.setBounds (bottom.removeFromLeft (90));
