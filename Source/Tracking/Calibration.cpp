@@ -1,4 +1,5 @@
 #include "Tracking/Calibration.h"
+#include "Theory/ChordFinder.h"
 #include "Tracking/PitchDetector.h"
 #include "Theory/Voicing.h"
 
@@ -51,11 +52,17 @@ namespace gl
     // =======================================================================
     // Calibration
     // =======================================================================
-    int Calibration::velocityFromPeak (float peak) const
+    int Calibration::velocityFromPeak (float peak, int string) const
     {
         if (peak <= 0.0f) return 1;
-        const double lo = std::log (std::max (1e-5f, softPeak));
-        const double hi = std::log (std::max (softPeak * 1.5f, hardPeak));
+        float soft = softPeak, hard = hardPeak;
+        if (string >= 0 && string < kMaxStrings && stringSoft[(size_t) string] > 0.0f && stringHard[(size_t) string] > 0.0f)
+        {
+            soft = stringSoft[(size_t) string];
+            hard = stringHard[(size_t) string];
+        }
+        const double lo = std::log (std::max (1e-5f, soft));
+        const double hi = std::log (std::max (soft * 1.5f, hard));
         const double t = (std::log (peak) - lo) / (hi - lo);
         return std::clamp ((int) std::lround (30.0 + t * 90.0), 1, 127);
     }
@@ -82,6 +89,8 @@ namespace gl
             out << "S " << s << ' ' << (int) sc.measured << ' ' << sc.centsOffset << ' ' << sc.intonationCents << ' '
                 << sc.inputChannel << ' ' << sc.gain << ' ' << channelNoise[(size_t) s] << '\n';
             out << "F " << s << ' ' << lastFret[(size_t) s] << '\n';
+            if (stringSoft[(size_t) s] > 0.0f || stringHard[(size_t) s] > 0.0f)
+                out << "D " << s << ' ' << stringSoft[(size_t) s] << ' ' << stringHard[(size_t) s] << '\n';
 
             for (int c = 0; c < kMaxStrings; ++c)
                 if (bleed[(size_t) s][(size_t) c] > 0.0f)
@@ -155,6 +164,16 @@ namespace gl
                 if (ls >> s >> f && s >= 0 && s < kMaxStrings)
                     lastFret[(size_t) s] = std::clamp (f, 0, kNumFrets);
             }
+            else if (tag == "D")
+            {
+                int s = -1;
+                float soft = 0.0f, hard = 0.0f;
+                if (ls >> s >> soft >> hard && s >= 0 && s < kMaxStrings)
+                {
+                    stringSoft[(size_t) s] = soft;
+                    stringHard[(size_t) s] = hard;
+                }
+            }
             else if (tag == "B")
             {
                 int s = -1, c = -1;
@@ -198,26 +217,67 @@ namespace gl
     // =======================================================================
     std::vector<ChordTemplate> CalibrationSession::chordShapesFor (const Instrument& inst)
     {
+        // Many chord types, so the tracker knows how YOUR guitar sounds for each kind of chord:
+        // open chords, sevenths, suspended chords, barre chords up the neck and power chords.
         std::vector<ChordTemplate> out;
-
-        VoicingOptions opt;
-        opt.maxSpan = 4;
-        opt.minStrings = std::min (4, inst.numStrings());
-        opt.maxStrings = 6;
-        opt.rootInBass = true;
-        opt.allowOpenStrings = true;
-        opt.minFret = 0;
-        opt.maxFret = 7;
-
-        for (const char* name : { "E", "A", "D", "G", "C", "Am", "Em", "Dm", "F", "Bm" })
+        auto addNamed = [&] (std::initializer_list<const char*> names, int minFret, int maxFret, bool openStrings)
         {
-            const auto chord = parseChordSymbol (name);
-            if (! chord) continue;
-            const auto found = findVoicings (*chord, inst, opt, 1);
-            if (found.empty()) continue;
-            out.push_back ({ name, found.front().frets, {} });
-            if (out.size() >= 8) break;
-        }
+            VoicingOptions opt;
+            opt.maxSpan = 4;
+            opt.minStrings = std::min (4, inst.numStrings());
+            opt.maxStrings = 6;
+            opt.rootInBass = true;
+            opt.allowOpenStrings = openStrings;
+            opt.minFret = minFret;
+            opt.maxFret = maxFret;
+            for (const char* name : names)
+            {
+                // The fingering most guitarists use (open chord, barre chord...) when it fits this part of the neck.
+                bool added = false;
+                if (const auto parsed = parseChordName (name))
+                    for (const auto& c : commonShapes (*parsed, inst))
+                    {
+                        const auto& f = c.voicing.frets;
+                        const bool usesOpen = std::find (f.begin(), f.end(), 0) != f.end();
+                        bool inArea = true;
+                        for (int x : f) if (x > 0 && (x < minFret || x > maxFret)) inArea = false;
+                        if (! inArea || (usesOpen && ! openStrings) || c.voicing.numPlayed() < opt.minStrings) continue;
+                        out.push_back ({ name, f, {} });
+                        added = true;
+                        break;
+                    }
+                if (added) continue;
+
+                const auto chord = parseChordSymbol (name);
+                if (! chord) continue;
+                const auto found = findVoicings (*chord, inst, opt, 1);
+                if (! found.empty())
+                    out.push_back ({ name, found.front().frets, {} });
+            }
+        };
+
+        addNamed ({ "E", "A", "D", "G", "C", "Am", "Em", "Dm" }, 0, 4, true);                            // open
+        addNamed ({ "E7", "A7", "D7", "G7", "C7", "B7", "Am7", "Em7", "Dm7" }, 0, 4, true);              // sevenths
+        addNamed ({ "Cmaj7", "Fmaj7", "Amaj7", "Dmaj7" }, 0, 4, true);                                   // major sevenths
+        addNamed ({ "Asus2", "Asus4", "Dsus2", "Dsus4", "Esus4" }, 0, 4, true);                          // suspended
+        addNamed ({ "F", "Bb", "Bm", "Cm", "F#m", "Gm", "C#m", "Bm7b5" }, 1, 9, false);                  // barre chords
+
+        // Power chords (root + 5th + octave) on the two lowest strings, in any tuning.
+        const int n = inst.numStrings();
+        for (int low : { n - 1, n - 2 })
+            for (int fret : { 0, 3, 5, 7 })
+            {
+                if (low < 2) continue;
+                const int root = inst.tuning()[(size_t) low] + fret;
+                std::vector<int> frets ((size_t) n, -1);
+                frets[(size_t) low] = fret;
+                const int f5 = root + 7 - inst.tuning()[(size_t) low - 1];
+                const int f8 = root + 12 - inst.tuning()[(size_t) low - 2];
+                if (f5 < 0 || f5 > kNumFrets || f8 < 0 || f8 > kNumFrets || std::max (f5, f8) - fret > 4) continue;
+                frets[(size_t) low - 1] = f5;
+                frets[(size_t) low - 2] = f8;
+                out.push_back ({ pitchClassName (root % 12) + "5", frets, {} });
+            }
         return out;
     }
 
@@ -229,6 +289,8 @@ namespace gl
         cal.tuning = inst.tuning();
         inputs = std::clamp (numInputChannels, 1, kMaxStrings);
         full = fullCalibration;
+        softLevels.clear();
+        hardLevels.clear();
 
         const int lowest = inst.numStrings() - 1;
         plan.clear();
@@ -256,8 +318,20 @@ namespace gl
             plan.push_back ({ Step::TwelfthFret, 0 });
         }
 
-        plan.push_back ({ Step::Soft, inst.numStrings() / 2 });
-        plan.push_back ({ Step::Hard, inst.numStrings() / 2 });
+        if (full)
+        {
+            // Soft and hard picking on every string: each string gets its own velocity range.
+            for (int s = lowest; s >= 0; --s)
+            {
+                plan.push_back ({ Step::Soft, s });
+                plan.push_back ({ Step::Hard, s });
+            }
+        }
+        else
+        {
+            plan.push_back ({ Step::Soft, inst.numStrings() / 2 });
+            plan.push_back ({ Step::Hard, inst.numStrings() / 2 });
+        }
         plan.push_back ({ Step::Done, -1 });
 
         stepIndex = 0;
@@ -771,15 +845,22 @@ namespace gl
             if ((int) peaks.size() >= kHitsNeeded && ! noteActive)
             {
                 const float level = median (peaks);
+                const int s = currentString();
                 if (current == Step::Soft)
                 {
-                    cal.softPeak = level;
+                    softLevels.push_back (level);
+                    cal.softPeak = median (softLevels);
+                    if (full && s >= 0 && s < kMaxStrings) cal.stringSoft[(size_t) s] = level;
                     statusText = "Soft picking measured.";
                 }
                 else
                 {
-                    cal.hardPeak = std::max (level, cal.softPeak * 1.5f);
-                    statusText = level < cal.softPeak * 1.5f
+                    const float soft = (full && s >= 0 && s < kMaxStrings && cal.stringSoft[(size_t) s] > 0.0f)
+                                     ? cal.stringSoft[(size_t) s] : cal.softPeak;
+                    hardLevels.push_back (std::max (level, soft * 1.5f));
+                    cal.hardPeak = std::max (median (hardLevels), cal.softPeak * 1.5f);
+                    if (full && s >= 0 && s < kMaxStrings) cal.stringHard[(size_t) s] = std::max (level, soft * 1.5f);
+                    statusText = level < soft * 1.5f
                         ? "Hard and soft sounded almost the same, so the velocity range will be small. You can run calibration again."
                         : "Hard picking measured.";
                 }

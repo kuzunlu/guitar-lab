@@ -10,7 +10,7 @@ namespace gl
         constexpr double kPi = 3.14159265358979323846;
     }
 
-    void Spectrum::prepare (int size)
+    void Spectrum::prepare (int size, int fallLength)
     {
         n = 1;
         while (n < size) n <<= 1;
@@ -20,6 +20,16 @@ namespace gl
         window.resize ((size_t) n);
         for (int i = 0; i < n; ++i)
             window[(size_t) i] = (float) (0.5 - 0.5 * std::cos (2.0 * kPi * i / (n - 1)));
+
+        if (fallLength > 0 && fallLength < n)
+        {
+            const int rise = n - fallLength;
+            for (int i = 0; i < n; ++i)
+            {
+                const double t = i < rise ? (double) i / rise : 1.0 + (double) (i - rise) / fallLength;
+                window[(size_t) i] = (float) (0.5 - 0.5 * std::cos (kPi * t)); // 0 -> 1 over the rise, 1 -> 0 over the fall
+            }
+        }
 
         twiddles.resize ((size_t) n / 2);
         for (int i = 0; i < n / 2; ++i)

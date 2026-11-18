@@ -63,17 +63,18 @@ juce::AudioProcessorValueTreeState::ParameterLayout GuitarLabProcessor::createLa
                     NormalisableRange<float> (40.0f, 300.0f, 1.0f), 120.0f, AudioParameterFloatAttributes().withLabel ("bpm")));
     layout.add (std::make_unique<AudioParameterBool>  (ParameterID { ParamIDs::synthOn, 1 },        "Built-in sound", true));
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::synthVolume, 1 },    "Sound volume",
-                    NormalisableRange<float> (0.0f, 1.0f), 0.5f));
+                    NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.5f));
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::synthTone, 1 },      "Sound brightness",
-                    NormalisableRange<float> (0.0f, 1.0f), 0.6f));
+                    NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.6f));
     layout.add (std::make_unique<AudioParameterBool>  (ParameterID { ParamIDs::legatoOverlap, 1 },  "Legato overlap", true));
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::legatoVelocity, 1 }, "Legato velocity",
-                    NormalisableRange<float> (0.2f, 1.0f), 0.65f));
+                    NormalisableRange<float> (0.2f, 1.0f, 0.01f), 0.65f));
     layout.add (std::make_unique<AudioParameterBool>  (ParameterID { ParamIDs::passThrough, 1 },    "MIDI thru", true));
     layout.add (std::make_unique<AudioParameterInt>   (ParameterID { ParamIDs::liveVelocity, 1 },   "Click velocity", 1, 127, 100));
 
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::trackMode, 1 },     "Guitar tracking",
-                    StringArray { "Off", "Normal guitar (mono)", "Hex pickup (one input per string)" }, 0));
+                    StringArray { "Off", "Normal guitar: single notes (mono)", "Hex pickup (one input per string)",
+                                  "Normal guitar: chords too (poly)" }, 0)); // new modes go at the end: saved projects keep the number
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::trackInput, 1 },    "Tracking input",
                     StringArray { "Mix of all inputs", "Input 1", "Input 2" }, 1));
     layout.add (std::make_unique<AudioParameterInt>    (ParameterID { ParamIDs::trackStability, 1 }, "Tracking safety", 1, 8, 3));

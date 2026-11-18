@@ -2,6 +2,7 @@
 
 #include "Midi/MidiRenderer.h"
 #include "Midi/PhraseRecorder.h"
+#include "Theory/ChordFinder.h"
 #include "Theory/Reharm.h"
 #include "Theory/Trainer.h"
 #include "Theory/Voicing.h"
@@ -61,6 +62,182 @@ static void testInstrument()
     checkEq (g.noteAt ({ 6, 0 }), 35, "7-string low B1");
 
     checkEq ((int) g.positionsOf (64).size(), 6, "E4 appears on 6 strings of a 7-string (24 frets)");
+}
+
+static void testChordNames()
+{
+    auto best = [] (std::vector<int> notes) { auto m = nameChord (notes); return m.empty() ? std::string ("-") : m[0].name; };
+    auto offers = [] (std::vector<int> notes, const std::string& name)
+    {
+        for (const auto& m : nameChord (notes)) if (m.name == name) return true;
+        return false;
+    };
+    auto meaningHas = [] (std::vector<int> notes, const std::string& text)
+    {
+        auto m = nameChord (notes);
+        return ! m.empty() && m[0].meaning.find (text) != std::string::npos;
+    };
+    // MIDI: C3 = 48. Lowest note = bass.
+    struct Case { std::vector<int> notes; const char* name; };
+    const std::vector<Case> cases {
+        // Triads and their inversions
+        { { 48, 52, 55 }, "C" },          { { 52, 55, 60 }, "C/E" },        { { 55, 60, 64 }, "C/G" },
+        { { 48, 51, 55 }, "Cm" },         { { 48, 51, 54 }, "Cdim" },       { { 48, 52, 56 }, "Caug" },
+        { { 48, 53, 55 }, "Csus4" },      { { 48, 50, 55 }, "Csus2" },      { { 48, 51, 56 }, "Ab/C" },
+        { { 43, 47, 52 }, "Em/G" },       { { 48, 52, 55, 60, 64 }, "C" },  { { 45, 52, 57, 60, 64 }, "Am" },
+        // Sevenths
+        { { 48, 52, 55, 58 }, "C7" },     { { 48, 52, 55, 59 }, "Cmaj7" },  { { 48, 51, 55, 58 }, "Cm7" },
+        { { 48, 51, 54, 58 }, "Cm7b5" },  { { 48, 51, 54, 57 }, "Cdim7" },  { { 48, 51, 55, 59 }, "Cm(maj7)" },
+        { { 48, 52, 56, 58 }, "C7#5" },   { { 48, 52, 56, 59 }, "Cmaj7#5" },{ { 48, 53, 55, 58 }, "C7sus4" },
+        { { 43, 47, 53 }, "G7" },         { { 43, 47, 50, 53 }, "G7" },     { { 47, 50, 53, 57 }, "Bm7b5" },
+        { { 43, 45, 48, 52 }, "Am7/G" },  { { 45, 48, 52, 55 }, "Am7" },    { { 48, 53, 58 }, "C7sus4" },
+        // Sixths, add chords, extensions
+        { { 48, 52, 55, 57 }, "C6" },     { { 48, 51, 55, 57 }, "Cm6" },    { { 48, 52, 55, 57, 62 }, "C6/9" },
+        { { 48, 52, 55, 62 }, "Cadd9" },  { { 48, 51, 55, 62 }, "Cmadd9" }, { { 48, 50, 52, 55 }, "Cadd9" },
+        { { 48, 52, 55, 58, 62 }, "C9" }, { { 48, 52, 55, 59, 62 }, "Cmaj9" }, { { 48, 51, 55, 58, 62 }, "Cm9" },
+        { { 48, 51, 58, 62, 65 }, "Cm11" }, { { 40, 45, 50, 55, 59 }, "Em11" }, // "So What" voicing
+        { { 48, 52, 58, 62, 69 }, "C13" }, { { 48, 52, 59, 62, 69 }, "Cmaj13" },
+        // Altered
+        { { 48, 52, 58, 61 }, "C7b9" },   { { 48, 52, 55, 58, 63 }, "C7#9" }, { { 40, 47, 52, 56, 62, 67 }, "E7#9" },
+        { { 48, 52, 59, 66 }, "Cmaj7(#11)" }, { { 48, 52, 58, 62, 66, 69 }, "C13#11" },
+        { { 48, 52, 58, 61, 63, 68 }, "C7(b9,#9,b13)" }, { { 48, 52, 54, 58 }, "C7b5" },
+        // Over a bass note, power chords, two notes
+        { { 43, 53, 57, 60 }, "G9sus4" }, { { 48, 50, 54, 57 }, "D7/C" },
+        { { 45, 52 }, "A5" },             { { 48, 55, 60 }, "C5" },         { { 43, 48 }, "C5/G" },
+        { { 48, 52 }, "C + E" },
+    };
+    for (const auto& c : cases)
+        check (best (c.notes) == c.name, std::string ("chord name: ") + c.name + " (got " + best (c.notes) + ")");
+
+    check (offers ({ 43, 53, 57, 60 }, "F/G"), "chord name: G F A C is also offered as F/G");
+    check (offers ({ 48, 50, 54, 57 }, "D/C"), "chord name: C D F# A is also offered as D/C");
+    check (offers ({ 52, 55, 58, 62 }, "C9") || best ({ 52, 55, 58, 62 }) == "Em7b5", "chord name: rootless C9 reads as Em7b5 first");
+    check (meaningHas ({ 48, 51, 54, 57 }, "Bbb = diminished 7th"), "chord name: Cdim7 spells its 7th as Bbb");
+    check (meaningHas ({ 48, 52, 55, 58, 63 }, "D# = sharp 9th"), "chord name: C7#9 spells the #9 as D#, not Eb");
+    check (meaningHas ({ 52, 55, 60 }, "E in the bass"), "chord name: inversions say which note is in the bass");
+    checkEq (best ({ 48, 60 }), std::string ("-"), "chord name: an octave is not a chord");
+    check (nameChord ({ 48, 51, 54, 57 }).size() >= 4, "chord name: dim7 can be named from any of its notes");
+    checkEq (nameChord ({ 49, 53, 56 }, true)[0].name, std::string ("Db"), "chord name: flats when asked (Db, not C#)");
+    checkEq (nameChord ({ 49, 52, 56 })[0].name, std::string ("C#m"), "chord name: C#m (not Dbm)");
+
+    // Every possible set of note names gets a name (no crash, never empty).
+    int unnamed = 0;
+    for (unsigned mask = 1; mask < 4096; ++mask)
+    {
+        std::vector<int> notes;
+        for (int pc = 0; pc < 12; ++pc) if (mask & (1u << pc)) notes.push_back (48 + pc);
+        const auto m = nameChord (notes);
+        if (notes.size() >= 2 && (m.empty() || m[0].name.empty())) ++unnamed;
+    }
+    checkEq (unnamed, 0, "chord name: all 4095 note sets get a name");
+}
+
+static void testChordSymbols()
+{
+    auto ivs = [] (const char* text)
+    {
+        auto c = parseChordName (text);
+        if (! c) return std::string ("none");
+        auto v = c->intervals;
+        std::sort (v.begin(), v.end());
+        std::string s;
+        for (int i : v) s += std::to_string (i) + " ";
+        return s;
+    };
+    checkEq (ivs ("C"), std::string ("0 4 7 "), "symbol: C");
+    checkEq (ivs ("Cmaj7"), std::string ("0 4 7 11 "), "symbol: Cmaj7");
+    checkEq (ivs ("CM7"), std::string ("0 4 7 11 "), "symbol: CM7 = Cmaj7");
+    checkEq (ivs ("C\xCE\x94" "7"), std::string ("0 4 7 11 "), "symbol: C(delta)7 = Cmaj7");
+    checkEq (ivs ("C-7"), std::string ("0 3 7 10 "), "symbol: C-7 = Cm7");
+    checkEq (ivs ("Cm7b5"), std::string ("0 3 6 10 "), "symbol: Cm7b5");
+    checkEq (ivs ("C\xC3\xB8"), std::string ("0 3 6 10 "), "symbol: C(o-slash) = half-diminished");
+    checkEq (ivs ("Cdim7"), std::string ("0 3 6 9 "), "symbol: Cdim7");
+    checkEq (ivs ("Cm(maj7)"), std::string ("0 3 7 11 "), "symbol: Cm(maj7)");
+    checkEq (ivs ("C7#9"), std::string ("0 3 4 7 10 "), "symbol: C7#9");
+    checkEq (ivs ("C7b9"), std::string ("0 1 4 7 10 "), "symbol: C7b9 has no natural 9");
+    checkEq (ivs ("C13"), std::string ("0 2 4 7 9 10 "), "symbol: C13");
+    checkEq (ivs ("C6/9"), std::string ("0 2 4 7 9 "), "symbol: C6/9 (the /9 is not a bass note)");
+    checkEq (ivs ("Csus2"), std::string ("0 2 7 "), "symbol: Csus2");
+    checkEq (ivs ("C7sus4"), std::string ("0 5 7 10 "), "symbol: C7sus4");
+    checkEq (ivs ("Cadd9"), std::string ("0 2 4 7 "), "symbol: Cadd9");
+    checkEq (ivs ("C5"), std::string ("0 7 "), "symbol: C5 power chord");
+    checkEq (ivs ("C+"), std::string ("0 4 8 "), "symbol: C+ = augmented");
+    checkEq (ivs ("C7(no3)"), std::string ("0 7 10 "), "symbol: C7(no3)");
+    checkEq (ivs ("Cmaj7#11"), std::string ("0 4 6 7 11 "), "symbol: Cmaj7#11");
+    checkEq (ivs ("Hm7"), std::string ("none"), "symbol: H is not a note name");
+    checkEq (ivs ("Cxyz"), std::string ("none"), "symbol: nonsense is refused");
+    {
+        auto d = parseChordName ("D/F#");
+        check (d && d->root == 2 && d->bass == 6, "symbol: D/F# has F# in the bass");
+        auto bb = parseChordName ("Bbm7");
+        check (bb && bb->root == 10, "symbol: Bbm7 root is Bb");
+    }
+
+    // Round trip: symbol -> notes -> name gives the same symbol back.
+    for (const char* name : { "C", "Cm", "C7", "Cmaj7", "Cm7", "Cm7b5", "Cdim7", "Caug", "Csus4", "Csus2", "C6", "Cm6",
+                              "C9", "Cmaj9", "Cm9", "C13", "C7b9", "C7#9", "C7sus4", "Cadd9", "C6/9", "F#m7", "Bb7", "Ebmaj7" })
+    {
+        auto c = parseChordName (name);
+        std::vector<int> notes;
+        if (c) for (int iv : c->intervals) notes.push_back (48 + c->root + iv);
+        const auto named = nameChord (notes);
+        check (! named.empty() && named[0].name == name,
+               std::string ("symbol round trip: ") + name + " (got " + (named.empty() ? "-" : named[0].name) + ")");
+    }
+
+    // Shapes for typed chords.
+    Instrument g;
+    VoicingOptions opt;
+    opt.minStrings = 3;
+    auto shapes = [&] (const char* name, bool rootInBass = true)
+    {
+        auto o = opt;
+        o.rootInBass = rootInBass;
+        std::vector<std::string> out;
+        for (const auto& v : findShapes (shapeRequestFor (*parseChordName (name)), g, o, 500)) out.push_back (voicingToText (v));
+        return out;
+    };
+    auto contains = [] (const std::vector<std::string>& v, const char* s) { return std::find (v.begin(), v.end(), s) != v.end(); };
+    check (contains (shapes ("C"), "x32010"), "shapes: open C is found");
+    check (contains (shapes ("C"), "x35553"), "shapes: barre C at the 3rd fret is found");
+    check (contains (shapes ("D/F#"), "2x0232"), "shapes: D/F# with F# on the low E string is found");
+    check (contains (shapes ("Cmaj7"), "x32000"), "shapes: open Cmaj7 is found");
+    {
+        const auto e = shapes ("E7#9");
+        std::string some;
+        for (size_t i = 0; i < e.size() && i < 12; ++i) some += e[i] + " ";
+        check (contains (e, "x7678x"), "shapes: the 'Hendrix' E7#9 is found (" + std::to_string (e.size()) + " found: " + some + ")");
+    }
+    check (shapes ("C").size() > 20, "shapes: many C shapes all over the neck");
+
+    // The fingering most guitarists play comes first.
+    struct Usual { const char* chord; const char* shape; };
+    for (const auto& u : std::vector<Usual> {
+             { "E", "022100" }, { "A", "x02220" }, { "C", "x32010" }, { "G", "320003" }, { "D", "xx0232" },
+             { "Am", "x02210" }, { "Em", "022000" }, { "Dm", "xx0231" }, { "F", "133211" }, { "Bm", "x24432" },
+             { "Bb", "x13331" }, { "F#m", "244222" }, { "Cm", "x35543" }, { "C#m", "x46654" },
+             { "E7", "020100" }, { "A7", "x02020" }, { "B7", "x21202" }, { "Am7", "x02010" }, { "Cmaj7", "x32000" },
+             { "Bb7", "x13131" }, { "Cm7", "x35343" }, { "Asus4", "x02230" }, { "E5", "022xxx" } })
+    {
+        const auto c = commonShapes (*parseChordName (u.chord), g);
+        const std::string first = c.empty() ? "-" : voicingToText (c.front().voicing);
+        check (first == u.shape, std::string ("usual fingering first: ") + u.chord + " = " + u.shape + " (got " + first + ")");
+    }
+    {
+        const auto e = commonShapes (*parseChordName ("E"), g);
+        check (e.size() >= 3 && e[0].kind == "Open chord" && e[1].kind.rfind ("Barre", 0) == 0,
+               "usual fingerings: open E first, then the barre shapes up the neck");
+    }
+    {
+        auto o = opt;
+        int wrong = 0;
+        for (const auto& v : findShapes (shapeRequestFor (*parseChordName ("D/F#")), g, o, 200))
+        {
+            const auto n = v.notes (g);
+            if (pitchClassOf (*std::min_element (n.begin(), n.end())) != 6) ++wrong;
+        }
+        checkEq (wrong, 0, "shapes: every D/F# shape has F# as its lowest note");
+    }
 }
 
 static void testChords()
@@ -614,9 +791,19 @@ static void testFullCalibration()
 
     // Chords: strum each shown shape 3 times; fingerprints match the shape.
     const auto shapes = CalibrationSession::chordShapesFor (g);
-    check (shapes.size() >= 6, "at least 6 chord shapes found for standard tuning");
+    check (shapes.size() >= 30, "full calibration asks for 30+ chords (open, 7ths, sus, barre, power chords)");
+    {
+        bool power = false, barre = false, seventh = false;
+        for (const auto& sh : shapes)
+        {
+            if (sh.name == "E5") power = true;
+            if (sh.name == "F") barre = std::find (sh.frets.begin(), sh.frets.end(), 0) == sh.frets.end();
+            if (sh.name == "B7") seventh = true;
+        }
+        check (power && barre && seventh, "chord list has power chords, a barre F and B7");
+    }
     guard = 0;
-    while (cs.step() == CalibrationSession::Step::Chord && guard++ < 20)
+    while (cs.step() == CalibrationSession::Step::Chord && guard++ < 200)
     {
         const auto* ch = cs.currentChord();
         Chroma ideal {};
@@ -635,10 +822,27 @@ static void testFullCalibration()
     check (cs.step() == CalibrationSession::Step::Soft, "all chords learned");
     checkEq ((int) cs.result().chords.size(), (int) shapes.size(), "one fingerprint per chord shape");
 
+    // Soft and hard picking on every string; the high strings are picked a little louder here.
+    for (int step = 0; step < 12 && ! cs.finished(); ++step)
+    {
+        const int s = cs.currentString();
+        const float peak = (cs.step() == CalibrationSession::Step::Soft ? 0.04f : 0.5f) * (s < 3 ? 1.5f : 1.0f);
+        for (int h = 0; h < 4; ++h)
+        {
+            for (int i = 0; i < 20; ++i) cs.feed ({ 0, 196.0f, 0.95f, peak * 0.5f, i < 3 ? peak : peak * 0.4f }, hop);
+            for (int i = 0; i < 20; ++i) cs.feed ({ 0, 0.0f, 0.0f, 0.0004f, 0.0005f }, hop);
+        }
+    }
+    check (cs.finished(), "full calibration: soft and hard picking asked on every string, then done");
+    check (cs.result().stringSoft[0] > cs.result().stringSoft[5] && cs.result().stringHard[5] > 0.0f,
+           "full calibration: each string has its own soft and hard level");
+    check (cs.result().velocityFromPeak (0.08f, 0) + 8 < cs.result().velocityFromPeak (0.08f, 5),
+           "the same pick strength is softer on a string that is louder by nature");
+
     auto copy = Calibration {};
     copy.deserialise (cs.result().serialise());
-    check (copy.positions[5][7].measured && copy.chords.size() == cs.result().chords.size() && copy.lastFret[3] == 22,
-           "full calibration survives save/load");
+    check (copy.positions[5][7].measured && copy.chords.size() == cs.result().chords.size() && copy.lastFret[3] == 22
+           && copy.stringSoft[0] == cs.result().stringSoft[0], "full calibration survives save/load");
 }
 
 static void testTimbreString()
@@ -737,6 +941,219 @@ static void testChordTracking()
         auto single = pluck (0.5, [] (double) { return 110.0; });
         auto ev = runTracker (t, single);
         checkEq (count (ev, 0x90), 1, "single note is not mistaken for the taught chord");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Poly mode: several notes at once from one cable
+// ---------------------------------------------------------------------------
+namespace
+{
+    // Karplus-Strong plucked string: noise burst in a feedback delay line. More like a real string than a
+    // sawtooth: random harmonic strengths, and the high harmonics die faster. semisAt(t) bends the note.
+    template <typename BendFn>
+    std::vector<float> ksString (int midi, double seconds, double amp, unsigned seed, BendFn semisAt)
+    {
+        std::vector<float> out ((size_t) (seconds * kRate), 0.0f);
+        unsigned state = seed * 2654435761u + 12345u;
+        auto noise = [&state] { state = state * 1664525u + 1013904223u; return (double) (state >> 8) / (1 << 24) * 2.0 - 1.0; };
+
+        // The pick pulls the string into a triangle; where it is picked changes the harmonics (different per seed).
+        const double period0 = kRate / midiToHz (midi);
+        const int burst = (int) period0;
+        const double pickAt = 0.1 + 0.2 * std::fmod (seed * 0.618034, 1.0);
+        for (int i = 0; i < burst && i < (int) out.size(); ++i)
+        {
+            const double u = (double) i / burst;
+            const double shape = u < pickAt ? u / pickAt : (1.0 - u) / (1.0 - pickAt);
+            out[(size_t) i] = (float) ((shape - 0.5 + 0.1 * noise()) * amp * 2.0);
+        }
+        auto at = [&out] (double pos)
+        {
+            if (pos < 0.0) return 0.0;
+            const auto k = (size_t) pos;
+            const double t = pos - (double) k;
+            return out[k] * (1.0 - t) + out[k + 1] * t;
+        };
+        for (size_t n = (size_t) burst; n < out.size(); ++n)
+        {
+            const double period = kRate / midiToHz (midi + semisAt (n / kRate));
+            const double d = (double) n - (period - 0.5);
+            out[n] = (float) (0.996 * 0.5 * (at (d) + at (d - 1.0)));
+        }
+        return out;
+    }
+
+    std::vector<float> ksString (int midi, double seconds, double amp = 0.3, unsigned seed = 1)
+    {
+        return ksString (midi, seconds, amp, seed, [] (double) { return 0.0; });
+    }
+
+    void mixAt (std::vector<float>& into, const std::vector<float>& add, double atSeconds)
+    {
+        const auto start = (size_t) (atSeconds * kRate);
+        if (into.size() < start + add.size()) into.resize (start + add.size(), 0.0f);
+        for (size_t i = 0; i < add.size(); ++i) into[start + i] += add[i];
+    }
+
+    // Strum low string to high string, 12 ms apart.
+    std::vector<float> strum (const std::vector<int>& lowToHigh, double seconds, double gap = 0.012)
+    {
+        std::vector<float> out;
+        for (size_t i = 0; i < lowToHigh.size(); ++i)
+            mixAt (out, ksString (lowToHigh[i], seconds, 0.22, (unsigned) (i + 3)), i * gap);
+        return out;
+    }
+
+    Calibration polyTestCalibration()
+    {
+        Calibration cal;
+        cal.valid = true;
+        cal.noiseFloor = 0.001f; cal.softPeak = 0.05f; cal.hardPeak = 0.5f;
+        return cal;
+    }
+
+    std::vector<Captured> runPoly (const std::vector<float>& audio, const Instrument& g = Instrument())
+    {
+        TrackerSettings s;
+        s.mode = TrackMode::Poly;
+        s.monoInput = 0;
+        GuitarTracker t;
+        t.prepare (kRate, 512, g, polyTestCalibration(), s);
+        return runTracker (t, audio);
+    }
+
+    std::vector<int> pitchesStarted (const std::vector<Captured>& ev, int fromSample = 0, int toSample = 1 << 30)
+    {
+        std::vector<int> p;
+        for (auto& e : ev)
+            if ((e.status & 0xF0) == 0x90 && e.d2 > 0 && e.offset >= fromSample && e.offset < toSample) p.push_back (e.d1);
+        std::sort (p.begin(), p.end());
+        p.erase (std::unique (p.begin(), p.end()), p.end()); // a note that moved to another string counts once
+        return p;
+    }
+
+    std::string listOf (const std::vector<int>& v)
+    {
+        std::string s;
+        for (int n : v) s += std::to_string (n) + " ";
+        return s;
+    }
+
+    // Channel of the last note-on of this pitch (notes of a strum may move to their final string).
+    int channelOfNote (const std::vector<Captured>& ev, int note)
+    {
+        int ch = -1;
+        for (auto& e : ev) if ((e.status & 0xF0) == 0x90 && e.d2 > 0 && e.d1 == note) ch = (e.status & 0x0F) + 1;
+        return ch;
+    }
+}
+
+static void testPolyTracking()
+{
+    // Single note: one note, then a note-off in the silence.
+    {
+        auto audio = ksString (45, 1.0);
+        append (audio, silenceOf (0.4));
+        const auto ev = runPoly (audio);
+        checkEq (listOf (pitchesStarted (ev)), listOf ({ 45 }), "poly: single A2 gives one note A2");
+        checkEq (count (ev, 0x80), 1, "poly: single A2 ends in the silence");
+    }
+
+    // Open chords: every note, nothing else, each on its own string.
+    struct ChordCase { const char* name; std::vector<int> lowToHigh; std::vector<int> channels; };
+    const std::vector<ChordCase> chords {
+        { "C major (x32010)",  { 48, 52, 55, 60, 64 },     { 6, 5, 4, 3, 2 } },
+        { "E minor (022000)",  { 40, 47, 52, 55, 59, 64 }, { 7, 6, 5, 4, 3, 2 } },
+        { "G major (320003)",  { 43, 47, 50, 55, 59, 67 }, { 7, 6, 5, 4, 3, 2 } },
+        { "A minor (x02210)",  { 45, 52, 57, 60, 64 },     { 6, 5, 4, 3, 2 } },
+        { "Power chord A5",    { 45, 52 },                 {} }, // open (x02) or 5th fret (57): both fine
+    };
+    for (const auto& c : chords)
+    {
+        auto audio = strum (c.lowToHigh, 1.5);
+        append (audio, silenceOf (0.3));
+        const auto ev = runPoly (audio);
+        auto want = c.lowToHigh;
+        std::sort (want.begin(), want.end());
+        const auto early = pitchesStarted (ev, 0, (int) (0.25 * kRate));
+        const auto all = pitchesStarted (ev);
+        check (listOf (early) == listOf (want), std::string ("poly: ") + c.name + " found within 250 ms (got " + listOf (early) + ")");
+        check (listOf (all) == listOf (want), std::string ("poly: ") + c.name + " has no extra notes (got " + listOf (all) + ")");
+        for (size_t i = 0; i < c.channels.size(); ++i)
+            checkEq (channelOfNote (ev, c.lowToHigh[i]), c.channels[i],
+                     std::string ("poly: ") + c.name + " note " + std::to_string (c.lowToHigh[i]) + " on its string's channel");
+    }
+
+    // Arpeggio: one note every 150 ms, all ringing. Each note starts soon after its pluck.
+    {
+        const std::vector<int> arp { 45, 52, 57, 60, 64 };
+        std::vector<float> audio;
+        for (size_t i = 0; i < arp.size(); ++i)
+            mixAt (audio, ksString (arp[i], 1.4 - i * 0.15, 0.25, (unsigned) (i + 11)), i * 0.15);
+        const auto ev = runPoly (audio);
+        std::vector<int> order;
+        double worst = 0.0;
+        for (size_t i = 0; i < arp.size(); ++i)
+            for (auto& e : ev)
+                if ((e.status & 0xF0) == 0x90 && e.d2 > 0 && e.d1 == arp[i])
+                {
+                    order.push_back (e.d1);
+                    worst = std::max (worst, e.offset / kRate - i * 0.15);
+                    break;
+                }
+        checkEq (listOf (order), listOf (arp), "poly: arpeggio, every note found");
+        check (listOf (pitchesStarted (ev)) == listOf ({ 45, 52, 57, 60, 64 }), "poly: arpeggio has no extra notes (got "
+                                                                                  + listOf (pitchesStarted (ev)) + ")");
+        check (worst < 0.1, "poly: arpeggio notes start within 100 ms (worst " + std::to_string ((int) (worst * 1000)) + " ms)");
+    }
+
+    // Latency of single notes across the neck.
+    {
+        double worst = 0.0;
+        std::string all;
+        for (int midi : { 40, 45, 50, 55, 59, 64, 69, 76, 84 })
+        {
+            const auto ev = runPoly (ksString (midi, 0.6, 0.3, (unsigned) midi));
+            double t = -1.0;
+            for (auto& e : ev) if ((e.status & 0xF0) == 0x90 && e.d2 > 0) { t = e.offset / kRate; break; }
+            check (t >= 0.0 && pitchesStarted (ev) == std::vector<int> { midi },
+                   "poly: single note " + std::to_string (midi) + " found alone (got " + listOf (pitchesStarted (ev)) + ")");
+            worst = std::max (worst, t);
+            all += std::to_string (midi) + ":" + std::to_string ((int) (t * 1000)) + "ms ";
+        }
+        std::printf ("  poly latency: %s\n", all.c_str());
+        check (worst < 0.08, "poly: single notes start within 80 ms (worst " + std::to_string ((int) (worst * 1000)) + " ms)");
+    }
+
+    // Same note picked twice = two notes.
+    {
+        auto audio = ksString (50, 0.5, 0.3, 4);
+        mixAt (audio, ksString (50, 0.6, 0.3, 5), 0.5);
+        const int ons = count (runPoly (audio), 0x90);
+        check (ons == 2, "poly: picking the same note again starts it again (got " + std::to_string (ons) + " note-ons)");
+    }
+
+    // Double stop with a bend: D3 holds, A3 bends up a whole step. The bend is pitch bend, not new notes.
+    {
+        auto audio = ksString (50, 1.2, 0.25, 6);
+        mixAt (audio, ksString (57, 1.2, 0.25, 7, [] (double t) { return t < 0.3 ? 0.0 : std::min (1.0, (t - 0.3) / 0.3) * 2.0; }), 0.0);
+        const auto ev = runPoly (audio);
+        check (listOf (pitchesStarted (ev)) == listOf ({ 50, 57 }), "poly: bent double stop starts only its two notes (got " + listOf (pitchesStarted (ev)) + ")");
+        const int ch = channelOfNote (ev, 57);
+        int maxBend = 8192;
+        for (auto& e : ev)
+            if ((e.status & 0xF0) == 0xE0 && (e.status & 0x0F) + 1 == ch) maxBend = std::max (maxBend, e.d1 | (e.d2 << 7));
+        const double semis = (maxBend - 8192) / 8192.0 * 12.0;
+        check (semis > 1.6 && semis < 2.4, "poly: whole-step bend sent as pitch bend (got " + std::to_string (semis) + " semitones)");
+    }
+
+    // Quiet noise: no notes.
+    {
+        std::vector<float> audio ((size_t) kRate, 0.0f);
+        unsigned st = 99;
+        for (auto& v : audio) { st = st * 1664525u + 1013904223u; v = ((float) (st >> 8) / (1 << 24) - 0.5f) * 0.002f; }
+        checkEq ((int) pitchesStarted (runPoly (audio)).size(), 0, "poly: hiss gives no notes");
     }
 }
 
@@ -901,6 +1318,9 @@ static void testRecorder()
 
 int main()
 {
+    testChordNames();
+    testChordSymbols();
+    testPolyTracking();
     testRecorder();
     testSpectrum();
     testFullCalibration();

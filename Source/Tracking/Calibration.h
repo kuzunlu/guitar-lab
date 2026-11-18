@@ -47,6 +47,7 @@ namespace gl
         float  noiseFloor = 0.002f;    // loudness (RMS) of silence
         float  softPeak = 0.03f;       // peak of a soft pluck
         float  hardPeak = 0.4f;        // peak of a hard pluck
+        std::array<float, kMaxStrings> stringSoft {}, stringHard {}; // full calibration: per string (0 = not measured)
         std::array<float, kMaxStrings> channelNoise {};   // hex: silence level per input
         std::array<StringCalibration, kMaxStrings> strings {};
 
@@ -78,7 +79,8 @@ namespace gl
         float gateOff() const { return gateOn() * 0.5f; }
 
         // Maps a pluck peak to MIDI velocity: soft pluck -> about 30, hard pluck -> about 120.
-        int velocityFromPeak (float peak) const;
+        // With a string (full calibration), that string's own soft and hard picking are used.
+        int velocityFromPeak (float peak, int string = -1) const;
 
         // Total cents correction for a string (whole-guitar offset + this string's own offset).
         double centsFor (int string) const;
@@ -182,6 +184,7 @@ namespace gl
         std::array<int, kMaxStrings> bleedCount {};
         std::vector<float> spotLevels;    // all measured pluck levels, for typicalLevel
         std::vector<ChordTemplate> chordList;
+        std::vector<float> softLevels, hardLevels; // full calibration: every string's result, for the overall values
         int chordIndex = 0;
         int strums = 0;
         size_t chromasAtStrumStart = 0;

@@ -268,8 +268,10 @@ namespace gl
 
         // --- Bars ---
         label (barsLabel, "Length", "Phrase length\nHow many bars (of 4 beats) the phrase has. The phrase loops over this length "
-                                    "when it plays in the DAW. Notes past the end are not played.");
-        for (int bars : { 1, 2, 4, 8, 16, 32 })
+                                    "when it plays in the DAW. Notes past the end are not played.\n"
+                                    "Up to 512 bars (about 17 minutes at 120 BPM). Recording your guitar makes it longer by itself "
+                                    "when the take needs it.");
+        for (int bars : { 1, 2, 4, 8, 16, 32, 64, 128, 256, 512 })
             barsBox.addItem (juce::String (bars) + (bars == 1 ? " bar" : " bars"), bars);
         barsBox.setTooltip (barsLabel.getTooltip());
         barsBox.onChange = [this]
@@ -542,9 +544,9 @@ namespace gl
         }
         proc.phrase.nextGroup += groups;
 
-        // Make the phrase long enough (1, 2, 4, 8, 16 or 32 bars, as in the Length box).
-        for (int bars : { 1, 2, 4, 8, 16, 32 })
-            if (bars * 4.0 >= end || bars == 32)
+        // Make the phrase long enough (1, 2, 4 ... 512 bars, as in the Length box).
+        for (int bars : { 1, 2, 4, 8, 16, 32, 64, 128, 256, 512 })
+            if (bars * 4.0 >= end || bars == 512)
             {
                 proc.phrase.lengthBeats = std::max (proc.phrase.lengthBeats, bars * 4.0);
                 break;
@@ -761,7 +763,7 @@ namespace gl
     void PhrasePanel::refresh()
     {
         loadingControls = true;
-        barsBox.setSelectedId (juce::jlimit (1, 32, (int) std::round (proc.phrase.lengthBeats / 4.0)), juce::dontSendNotification);
+        barsBox.setSelectedId (juce::jlimit (1, 512, (int) std::round (proc.phrase.lengthBeats / 4.0)), juce::dontSendNotification);
         loadingControls = false;
 
         tab.gridStep = stepBeats();

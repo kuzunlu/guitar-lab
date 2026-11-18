@@ -1,26 +1,28 @@
 # Guitar Lab
 
-A VST3 instrument plugin (plus a standalone app) for guitarists. Built with C++20 and JUCE.
-Three tools share one 24-fret neck (6, 7 or 8 strings, any tuning) and a piano view at the bottom:
+A VST3 audio effect plugin with MIDI output (plus a standalone app) for guitarists. Built with C++20 and JUCE.
+Five tabs share one 24-fret neck (6, 7 or 8 strings, any tuning), a piano view at the bottom, and a
+**chord analyser** at the right of the tab row (names the chord of whatever sounds: "Chord: Cmaj7/E").
+Tab order (= the `Tab` enum in `PluginEditor.h`, = the `addTab` order):
 
-1. **Play & Write** – play the neck live (drag = bend / slide) and write MIDI phrases with
+1. **Guitar -> MIDI** (opens first) – real-time tracking of a real guitar from the audio input. Modes:
+   - *Mono* (normal guitar, one cable, single notes): fastest; bends, slides, vibrato; string guessed from the
+     hand position and (after Full calibration) tone colour; only taught chords.
+   - *Poly* (normal guitar, one cable, chords too): several notes at once with per-note bends (`PolyTracker`).
+   - *Hex* (hexaphonic pickup, one input per string): every string tracked on its own.
+   Calibration wizard: tuning first, then Quick (silence, open strings, 12th fret, soft/hard) or Full
+   (every fret on every string, ~37 chords in mono/poly, soft and hard picking on every string).
+   Calibrations can be saved and loaded as **presets** (files, shared by all projects).
+2. **Play & Write** – play the neck live (drag = bend / slide) and write MIDI phrases (up to 512 bars) with
    hammer-ons, pull-offs, taps, palm mute, dead notes, harmonics, bends, slides, vibrato and strummed chords.
-2. **Reharm Lab** – type a progression (`I V vi IV`, `Dm7 G7 Cmaj7`), get substitutions
+   **Record guitar** writes the tracked notes into the phrase as editable tab (`PhraseRecorder`).
+3. **Chord Shapes** – type or pick any chord symbol (`Cmaj7`, `F#m7b5`, `G7#9`, `D/F#`, `E7alt`) and see every
+   playable shape for this tuning as chord diagrams (`parseChordName` + `findShapes`).
+4. **Reharm Lab** – type a progression (`I V vi IV`, `Dm7 G7 Cmaj7`), get substitutions
    (tritone sub, secondary dominant, borrowed chord, passing diminished, related ii-V, diatonic sub,
    backdoor dominant, extensions) with playable, voice-led voicings.
-3. **Trainer** – note-name, find-the-note, arpeggio and interval quizzes, focused on chosen strings
+5. **Trainer** – note-name, find-the-note, arpeggio and interval quizzes, focused on chosen strings
    and frets, weighted toward the player's weak spots, with a heat map.
-
-4. **Guitar -> MIDI** – real-time tracking of a real guitar from the audio input.
-   *Mono* mode (normal guitar, one cable): single notes with bends, slides, vibrato; string/fret is guessed
-   from the hand position; chords are not reliable. *Hex* mode (hexaphonic pickup, one input per string):
-   every string tracked on its own. A calibration wizard asks for the tuning first, then listens to silence,
-   each open string, the 12th fret, and soft/hard picking (Quick). *Full* calibration instead asks for every
-   fret on every string (real pitch, level and tone colour per spot; hex: string-to-string leak) and, in mono
-   mode, ~8 chords (chroma fingerprints). Mono mode then guesses the string from tone colour and recognises
-   taught chords.
-   **Record guitar** (Play & Write tab) writes the tracked notes into the phrase as editable tab:
-   hammer-ons, pull-offs, bends, slides, vibrato and chords are recognised (`PhraseRecorder`).
 
 ## Build
 
@@ -44,15 +46,28 @@ The C++ runtime is static (`/MT`), so the plugin needs only Windows' own DLLs (n
 `COPY_PLUGIN_AFTER_BUILD` is off on purpose. Do not install the plugin into system folders without asking.
 Inno Setup is not installed on the dev machine; CI installs it. Do not install it without asking.
 
+### Plugin type and vendor (like MIDI Guitar 3)
+
+- Guitar Lab is an **audio effect** (`IS_SYNTH FALSE`, VST3 category `Fx`) with MIDI in and MIDI out.
+  It goes on the audio track the guitar is plugged into. Other tracks play its MIDI by routing
+  (Ableton: MIDI track -> MIDI From = the guitar track, second box = Guitar Lab). Do not make it an instrument
+  again: then Ableton only allows it on MIDI tracks and the guitar audio cannot reach it.
+- **Guitar -> MIDI is the first tab and opens by default.** The `Tab` enum in `PluginEditor.h` must match
+  the `addTab` order (Tracker, Play, Shapes, Reharm, Trainer). That tab also has the **Built-in sound** switch (same `synthOn` parameter as in
+  MIDI / Sound settings): on to practise with Guitar Lab's own sound, off when the MIDI plays another instrument.
+- `COMPANY_NAME` is `Kursat` (the vendor name DAWs show), the same as the owner's stream-bridge plugin.
+- Keep `PLUGIN_MANUFACTURER_CODE Kuzu` and `PLUGIN_CODE GtLb` unchanged: together they are the plugin's ID.
+  Changing them makes DAWs see a new plugin, and saved projects lose their Guitar Lab.
+
 ## Code layout
 
 | Folder | What | Depends on JUCE? |
 |---|---|---|
-| `Source/Theory/` | Notes, instrument + tunings, chords + Roman numerals, reharm engine, voicing search, trainer logic | **No** |
+| `Source/Theory/` | Notes, instrument + tunings, chords + Roman numerals, reharm engine, voicing search (`findVoicings`, `findShapes` for any note set), trainer logic, `ChordFinder` (notes -> chord names, chord symbol -> notes) | **No** |
 | `Source/Midi/` | `Phrase` (the note/technique model), `MidiRenderer` (phrase -> MIDI events), `PhraseRecorder` (tracked MIDI -> phrase notes) | **No** |
-| `Source/Tracking/` | `PitchDetector` (YIN on a downsampled copy), `Spectrum` (FFT, tone colour, chroma), `Calibration` + `CalibrationSession` (wizard logic), `GuitarTracker` (audio -> notes/bends/velocity/chords) | **No** |
+| `Source/Tracking/` | `PitchDetector` (YIN on a downsampled copy), `Spectrum` (FFT, tone colour, chroma), `Calibration` + `CalibrationSession` (wizard logic), `GuitarTracker` (audio -> notes/bends/velocity/chords; runs `PolyTracker` in poly mode) | **No** |
 | `Source/Audio/` | `PluckSynth`: small built-in plucked-string sound (one voice per MIDI channel) | Yes |
-| `Source/UI/` | Fretboard, piano, top bar, the four tab panels, theme + tooltip look | Yes |
+| `Source/UI/` | Fretboard, piano, top bar, the five tab panels (`ShapesPanel` = Chord Shapes), theme + tooltip look | Yes |
 | `Source/PluginProcessor.*` | Parameters, state save/load, playback in sync with the host, live notes | Yes |
 | `Source/PluginEditor.*` | Lays out the window and routes fretboard/piano clicks to the open tab | Yes |
 | `Tests/CoreTests.cpp` | Plain asserts for `Theory/`, `Midi/` and `Tracking/` (no framework) | No |
@@ -103,12 +118,42 @@ Keep `Theory/`, `Midi/` and `Tracking/` free of JUCE, so they stay testable and 
   legato note-on belongs to the new note. A short single note that ends exactly where a chord with the same
   pitch starts is the tracker's chord swap and is dropped. Keep both in sync if the tracker changes.
 - Recorded bends keep their exact curve (so the sound is faithful); the tab text rounds them to half steps.
+- **Poly mode (`PolyTracker`)**, ~90 analyses a second: low-pass + downsample to ~12 kHz, 30 Hz low cut,
+  2048-point FFT with a low-latency window (fast fall over the last 256 samples) on a log scale (3 bins per
+  semitone), square-rooted, explained by NMF (KL, 15 rounds, warm start) with one fixed fingerprint per pitch
+  plus a noise fingerprint. Fingerprints come from the Full calibration's tone colour (harmonics 2-9) when there
+  is one, else `1/h^1.3`. Notes start after `stableFrames - 1` frames (+1 below 105 Hz) and must pass:
+  enough share of the energy, not a harmonic "ghost" of a louder note (`isGhost`), own harmonic peaks
+  (`hasHarmonicPeaks`), not inside a ringing note's bend (`isClaimed`). Strings: a small search
+  (`startNotes`) - one note per string, hand span, near the hand, notes of the same strum may move string.
+  ~75 ms into a strum of 3+ notes, `completeChord` adds octave notes hidden in a known shape (common shapes +
+  taught chords). Re-picks: a pick attack that no new note explains. Bends: exact pitch from a 512-point FFT.
+  The wizard always listens like mono (`GuitarTracker::prepare` swaps Poly for Mono while calibrating), so one
+  calibration fits mono and poly. `TrackMode` values are saved in projects: only add new modes at the end.
+- The poly rules were tuned on synthetic plucks (Karplus-Strong with a triangle pick shape at many pick
+  positions). Before changing a threshold, run the chord tests in `testPolyTracking`; real-guitar recordings
+  (WAV) are the best test when the owner has them.
 - Tracking tests use synthetic decaying sawtooth "plucks" in `Tests/CoreTests.cpp`. Add a test there for any
   change to note start/stop, bend vs. legato decisions, or the calibration steps.
 - **Every control needs a detailed tooltip.** First line = short title (shown bold), then plain-English lines
   that explain what it does and when to use it. Components that change by hover (fretboard, piano, tab view,
   chord cards) implement `getTooltip()` to describe what is under the mouse.
 - In the Trainer tab, never show the scale layer or note names on the neck: it would give answers away.
+  The chord analyser at the right of the tab row is empty there for the same reason.
+- **Chord names (`nameChord`)** analyse the intervals above every possible root (3rd, 5th, 7th, 9/11/13 and
+  alterations), spell each note by its degree (C7#9 has D#, Cdim7 has Bbb), and rank: root in the bass +25,
+  plain triad/seventh +15, rootless -30, each alteration -8. Inversions of plain triads must beat odd altered
+  names (C Eb Ab = Ab/C). `testChordNames` has ~50 cases and checks all 4095 note sets; add a case for any
+  change. `parseChordName` is the reverse (symbol -> intervals + optional notes + slash bass); the round-trip
+  test keeps both in step.
+- Voicing search: the **bass is the lowest pitch**, not the lowest string (an open A is below fret 14 on the
+  low E). `findShapes` takes any pitch-class set; `findVoicings` is a wrapper for the Reharm Lab.
+- **Calibration presets:** `%APPDATA%\Guitar Lab\Calibrations\<name>.glcal`, plain `Calibration::serialise()`
+  text. Loading one also switches the instrument to `cal.tuning` (through `InstrumentBar::applyTuning`).
+  No pop-up windows in the plugin (some hosts handle them badly): the name box and the two-click Delete are
+  in the tab itself.
+- Full calibration measures soft/hard per string (`stringSoft` / `stringHard`, saved as `D` lines);
+  `velocityFromPeak (peak, string)` uses them when present. Old files without `D` lines still load.
 - Plugin state (tuning, phrase, trainer stats, reharm input, keyswitches) is saved as plain text inside the
   `GuitarLabData` child of the parameter tree. Keep old fields readable when adding new ones.
 

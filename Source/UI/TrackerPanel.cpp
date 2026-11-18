@@ -140,13 +140,16 @@ namespace gl
                                 "highest string, and your soft and hard picking. Each step moves on by itself.");
         startButton.onClick = [this] { startListening (false); };
 
-        fullButton.setTooltip ("Full calibration (10-15 minutes)\nEverything from the quick calibration, plus:\n"
+        fullButton.setTooltip ("Full calibration (15-20 minutes, best results)\nEverything from the quick calibration, plus:\n"
             "  - EVERY fret on EVERY string (0 to 24, or until you press 'My guitar ends here'). This teaches the real pitch "
             "of each fret, how loud each spot is, and the tone colour of each string. In normal-guitar mode the tone colour "
-            "helps the tracker guess WHICH string you played. In hex mode it learns how much each string leaks into the other inputs.\n"
-            "  - (Normal guitar mode) about 8 common chords, strummed 3 times each. The tracker can then recognise these chords "
-            "and send the exact shape, one MIDI channel per string.\n"
-            "You can stop a step with Skip at any time.");
+            "helps the tracker guess WHICH string you played, and poly mode uses it as the fingerprint of every note. "
+            "In hex mode it learns how much each string leaks into the other inputs.\n"
+            "  - (Normal guitar) about 37 chords, strummed 3 times each: open chords, 7th, maj7 and sus chords, barre chords "
+            "up the neck and power chords. Mono mode can then recognise them; poly mode uses them to fill in octave notes that "
+            "hide inside other strings' sound.\n"
+            "  - Soft and hard picking on EVERY string, so velocity fits each string (thin strings are often louder).\n"
+            "You can stop a step with Skip at any time. Save the result as a preset afterwards (Saved calibrations).");
         fullButton.onClick = [this] { startListening (true); };
 
         endFretsButton.setTooltip ("My guitar ends here\nPress this when the fret asked for does not exist on your guitar "
@@ -336,9 +339,9 @@ namespace gl
 
                 text << "\nQUICK (1-2 min): stay quiet for 3 seconds, play each open string, play the 12th fret on the "
                         "lowest and highest string, then pick softly 4 times and hard 4 times.\n\n"
-                        "FULL (10-15 min, best results): stay quiet, then play EVERY fret on EVERY string, one after another"
-                     << (mode == TrackMode::Hex ? "" : ", then strum about 8 chords 3 times each")
-                     << ", then soft and hard picking. The fretboard shows what to play next.";
+                        "FULL (15-20 min, best results): stay quiet, then play EVERY fret on EVERY string, one after another"
+                     << (mode == TrackMode::Hex ? "" : ", then strum about 37 chords 3 times each (open, 7th, sus, barre and power chords)")
+                     << ", then soft and hard picking on every string. The fretboard shows what to play next.";
 
                 body.setText (text, juce::dontSendNotification);
                 startButton.setEnabled (mode != TrackMode::Off && inputs > 0);
@@ -431,12 +434,17 @@ namespace gl
 
         label (modeLabel, "Tracking", "Guitar tracking mode\n"
             "Off: Guitar Lab does not listen to audio.\n"
-            "Normal guitar (mono): a normal guitar on one cable. Very good for single notes, with bends, slides and vibrato. "
-            "Chords are NOT tracked reliably, because all strings arrive mixed together. The string and fret are guessed "
-            "from where your hand was last.\n"
+            "Normal guitar: single notes (mono): a normal guitar on one cable, one note at a time. The fastest and most "
+            "exact mode for lead playing: bends, slides, vibrato, hammer-ons. Chords only work if you taught them in a "
+            "Full calibration. The string is guessed from where your hand was last.\n"
+            "Normal guitar: chords too (poly): a normal guitar on one cable, several notes at once: chords, double stops, "
+            "ringing arpeggios, with bends per note. It explains the sound as a mix of notes, then finds a string and fret "
+            "for each one. A little slower than mono (about 50-65 ms), and it can miss an octave note that hides inside "
+            "another string's sound. A Full calibration makes it much better (it learns your guitar's tone).\n"
             "Hex pickup: a hexaphonic pickup (like Roland GK) with one audio channel per string. Each string is tracked on its own, "
             "so chords, per-string bends and the exact string are all correct. Needs one input per string.");
-        modeBox.addItemList ({ "Off", "Normal guitar (mono)", "Hex pickup (one input per string)" }, 1);
+        modeBox.addItemList ({ "Off", "Normal guitar: single notes (mono)", "Hex pickup (one input per string)",
+                               "Normal guitar: chords too (poly)" }, 1);
         modeBox.setTooltip (modeLabel.getTooltip());
         addAndMakeVisible (modeBox);
         modeAtt = std::make_unique<APVTS::ComboBoxAttachment> (proc.params, ParamIDs::trackMode, modeBox);
@@ -486,16 +494,26 @@ namespace gl
         addAndMakeVisible (monitorToggle);
         monitorAtt = std::make_unique<APVTS::ButtonAttachment> (proc.params, ParamIDs::trackMonitor, monitorToggle);
 
+        soundToggle.setTooltip ("Built-in sound\n"
+            "On: Guitar Lab plays its own plucked-string sound for the tracked notes (and the phrase), "
+            "so you can practise without loading another instrument.\n"
+            "Off: Guitar Lab is silent and only sends MIDI. Use Off when the MIDI plays another instrument "
+            "in your DAW, so you do not hear both.\n"
+            "The MIDI output is the same either way. Same switch as 'Built-in sound' in MIDI / Sound settings.");
+        addAndMakeVisible (soundToggle);
+        soundAtt = std::make_unique<APVTS::ButtonAttachment> (proc.params, ParamIDs::synthOn, soundToggle);
+
         calibrateButton.setTooltip ("Calibrate\n"
             "Teaches the tracker YOUR guitar. First it asks for your tuning, then it listens while you:\n"
             "  1. stay quiet (to learn the noise level),\n"
             "  2. play every open string (to learn how each string is really tuned, and in hex mode which input it is on),\n"
             "  3. play the 12th fret on the lowest and highest string (to check intonation and high notes),\n"
             "  4. pick softly and hard (to map your picking strength to MIDI velocity).\n"
-            "FULL calibration also asks for every fret on every string and (normal guitar) about 8 chords. "
-            "That lets the tracker guess the string from its sound, measure every fret's real pitch, "
-            "and recognise the chords you taught it.\n"
-            "Calibrate again after changing strings, tuning, pickup or audio interface.");
+            "FULL calibration also asks for every fret on every string, (normal guitar) about 37 chords, and soft and hard "
+            "picking on every string. That lets the tracker guess the string from its sound, measure every fret's real pitch, "
+            "recognise the chords you taught it, and give poly mode the real sound of your guitar.\n"
+            "Calibrate again after changing strings, tuning, pickup or audio interface. Save each guitar as a preset "
+            "(Saved calibrations) so you only do it once.");
         calibrateButton.onClick = [this]
         {
             wizard.begin();
@@ -503,6 +521,45 @@ namespace gl
             wizard.toFront (true);
         };
         addAndMakeVisible (calibrateButton);
+
+        // --- Calibration presets ---
+        presetLabel.setText ("Saved calibrations", juce::dontSendNotification);
+        presetLabel.setJustificationType (juce::Justification::centredRight);
+        const juce::String presetTip ("Saved calibrations (presets)\n"
+            "Pick one to load it. Use this when you switch guitars or tunings: calibrate each guitar once, save it, "
+            "and load it again later instead of calibrating again.\n"
+            "Loading replaces the calibration in use, and also sets Strings and Tuning in the top bar to the tuning "
+            "the calibration was made for.\n"
+            "Presets are shared by all your projects and by the standalone app. They are saved as small text files in:\n"
+            + presetFolder().getFullPathName());
+        presetLabel.setTooltip (presetTip);
+        presetBox.setTooltip (presetTip);
+        presetBox.setTextWhenNothingSelected ("Choose a saved calibration...");
+        presetBox.setTextWhenNoChoicesAvailable ("No saved calibrations yet");
+        presetBox.onChange = [this]
+        {
+            const int i = presetBox.getSelectedItemIndex();
+            if (i >= 0 && i < presetFiles.size()) loadPreset (presetFiles[i]);
+        };
+        addAndMakeVisible (presetLabel);
+        addAndMakeVisible (presetBox);
+
+        presetName.setTextToShowWhenEmpty ("Name, e.g. Strat Drop D", theme::textDim);
+        presetName.setTooltip ("Preset name\nA name for the calibration you are using now, for example the guitar and its tuning. "
+                               "Then press 'Save as preset'. A preset with the same name is replaced.");
+        presetName.onReturnKey = [this] { savePreset(); };
+        addAndMakeVisible (presetName);
+
+        savePresetButton.setTooltip ("Save as preset\nSaves the calibration you are using now under the name on the left, "
+                                     "so you can load it again in any project. Calibrate first.");
+        savePresetButton.onClick = [this] { savePreset(); };
+        addAndMakeVisible (savePresetButton);
+
+        deletePresetButton.setTooltip ("Delete preset\nDeletes the saved calibration chosen on the left (the file, not the "
+                                       "calibration in use). Click twice to be sure. This cannot be undone.");
+        deletePresetButton.onClick = [this] { deletePreset(); };
+        addAndMakeVisible (deletePresetButton);
+        refreshPresets();
 
         calStatus.setColour (juce::Label::textColourId, theme::textDim);
         calStatus.setTooltip ("Calibration status\nShows whether the tracker is calibrated, and for which tuning.");
@@ -515,6 +572,11 @@ namespace gl
         help.setText ("Tracked notes go to the MIDI output (one channel per string) and show in green. "
                       "To write them down as editable tab, use 'Record guitar' in the Play & Write tab.",
                       juce::dontSendNotification);
+        help.setTooltip ("Using it in a DAW\n"
+                         "Guitar Lab is an audio effect. Put it on the AUDIO track your guitar is plugged into.\n"
+                         "To play another instrument with it, make a MIDI track, set its 'MIDI From' to the guitar track "
+                         "and choose 'Guitar Lab' as the source (Ableton: the second box under MIDI From).\n"
+                         "For bends per string, turn on MPE for the instrument that receives the MIDI.");
         addAndMakeVisible (help);
 
         addAndMakeVisible (tuner);
@@ -532,6 +594,91 @@ namespace gl
             proc.calibrating = false;
             proc.rebuildTracker();
         }
+    }
+
+    juce::File TrackerPanel::presetFolder()
+    {
+        return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                   .getChildFile ("Guitar Lab").getChildFile ("Calibrations");
+    }
+
+    void TrackerPanel::showPresetMessage (const juce::String& text)
+    {
+        presetMessage = text;
+        presetMessageAt = juce::Time::getMillisecondCounter();
+        updateStatus();
+    }
+
+    void TrackerPanel::refreshPresets()
+    {
+        presetFiles = presetFolder().findChildFiles (juce::File::findFiles, false, "*.glcal");
+        presetFiles.sort();
+        presetBox.clear (juce::dontSendNotification);
+        for (int i = 0; i < presetFiles.size(); ++i)
+            presetBox.addItem (presetFiles[i].getFileNameWithoutExtension(), i + 1);
+        deleteArmedAt = 0;
+        deletePresetButton.setButtonText ("Delete");
+    }
+
+    void TrackerPanel::loadPreset (const juce::File& file)
+    {
+        Calibration c;
+        c.deserialise (file.loadFileAsString().toStdString());
+        if (! c.valid)
+        {
+            showPresetMessage ("Could not read the preset '" + file.getFileNameWithoutExtension() + "'.");
+            return;
+        }
+
+        proc.calibration = c;
+        // A calibration belongs to the tuning it was made for: switch to it.
+        if (! c.tuning.empty() && c.tuning != proc.instrument.tuning() && onTuningWanted)
+            onTuningWanted (c.tuning);
+        proc.rebuildTracker();
+        presetName.setText (file.getFileNameWithoutExtension(), juce::dontSendNotification);
+        showPresetMessage ("Loaded: " + file.getFileNameWithoutExtension());
+    }
+
+    void TrackerPanel::savePreset()
+    {
+        const auto name = juce::File::createLegalFileName (presetName.getText().trim());
+        if (! proc.calibration.valid)
+        {
+            showPresetMessage ("Nothing to save yet: calibrate first (Calibrate...).");
+            return;
+        }
+        if (name.isEmpty())
+        {
+            showPresetMessage ("Type a name for the preset first (box left of 'Save as preset').");
+            return;
+        }
+
+        const auto file = presetFolder().getChildFile (name + ".glcal");
+        if (! presetFolder().createDirectory() || ! file.replaceWithText (proc.calibration.serialise()))
+        {
+            showPresetMessage ("Could not save the preset to " + file.getFullPathName());
+            return;
+        }
+        refreshPresets();
+        presetBox.setSelectedItemIndex (presetFiles.indexOf (file), juce::dontSendNotification);
+        showPresetMessage ("Saved: " + name);
+    }
+
+    void TrackerPanel::deletePreset()
+    {
+        const int i = presetBox.getSelectedItemIndex();
+        if (i < 0 || i >= presetFiles.size()) return;
+
+        // First click arms the button, a second click within 3 seconds deletes.
+        const auto now = juce::Time::getMillisecondCounter();
+        if (deleteArmedAt == 0 || now - deleteArmedAt > 3000)
+        {
+            deleteArmedAt = now;
+            deletePresetButton.setButtonText ("Sure?");
+            return;
+        }
+        presetFiles[i].deleteFile();
+        refreshPresets();
     }
 
     void TrackerPanel::refresh()
@@ -559,14 +706,24 @@ namespace gl
         juce::String warn;
         if (mode != TrackMode::Off && inputs == 0)
             warn = "No audio input. In the standalone app: Options > Audio/MIDI Settings > enable an input. "
-                   "In a DAW: put Guitar Lab on a track that has an audio input.";
+                   "In a DAW: put Guitar Lab on an audio track and set the track input to your guitar.";
         else if (mode == TrackMode::Hex && inputs < proc.instrument.numStrings())
             warn = "Hex mode needs " + juce::String (proc.instrument.numStrings()) + " inputs (one per string), but only "
                  + juce::String (inputs) + " are active. Enable more input channels in your audio settings or DAW track.";
-        else if (mode == TrackMode::Mono && inputBox.getSelectedItemIndex() > inputs)
+        else if ((mode == TrackMode::Mono || mode == TrackMode::Poly) && inputBox.getSelectedItemIndex() > inputs)
             warn = "The chosen input does not exist on this audio device.";
         else if (mode != TrackMode::Off && cal.valid && cal.hexMode != (mode == TrackMode::Hex))
             warn = "The calibration was made for the other mode. Please calibrate again.";
+
+        // Messages from the preset buttons stay for a few seconds.
+        const auto now = juce::Time::getMillisecondCounter();
+        if (presetMessage.isNotEmpty() && now - presetMessageAt < 5000)
+            warn = presetMessage;
+        if (deleteArmedAt != 0 && now - deleteArmedAt > 3000)
+        {
+            deleteArmedAt = 0;
+            deletePresetButton.setButtonText ("Delete");
+        }
         warning.setText (warn, juce::dontSendNotification);
     }
 
@@ -598,7 +755,7 @@ namespace gl
         tuner.gate = cal.gateOn() / std::max (0.25f, proc.params.getRawParameterValue (ParamIDs::trackSensitivity)->load());
         tuner.centsCorrection = cal.valid ? cal.globalCents : 0.0;
 
-        if (mode == TrackMode::Mono)
+        if (mode == TrackMode::Mono || mode == TrackMode::Poly)
         {
             TunerView::Row row { "Guitar", last[0].hz, last[0].clarity, last[0].rms, -1 };
             if (wizard.isListening()) row.expected = wizard.expectedNote();
@@ -660,8 +817,14 @@ namespace gl
         auto b = row();
         put (b, bendsToggle, 230);
         put (b, monitorToggle, 110);
+        put (b, soundToggle, 130);
         put (b, calibrateButton, 110);
         calStatus.setBounds (b);
+
+        auto c = row();
+        put (c, presetLabel, 130);       put (c, presetBox, 260);
+        put (c, deletePresetButton, 70); c.removeFromLeft (16);
+        put (c, presetName, 200);        put (c, savePresetButton, 120);
 
         warning.setBounds (row (20));
         help.setBounds (row (20));

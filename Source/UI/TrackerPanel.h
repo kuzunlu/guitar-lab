@@ -60,7 +60,7 @@ namespace gl
         Page page = Page::Tuning;
 
         juce::Label title, body, instruction, status, stepLabel;
-        juce::TextButton startButton { "Quick calibration (1-2 min)" }, fullButton { "Full calibration (10-15 min)" },
+        juce::TextButton startButton { "Quick calibration (1-2 min)" }, fullButton { "Full calibration (15-20 min)" },
                          endFretsButton { "My guitar ends here" }, cancelButton { "Cancel" },
                          retryButton { "Retry" }, acceptButton { "Accept" }, skipButton { "Skip" },
                          saveButton { "Save calibration" }, discardButton { "Discard" };
@@ -79,6 +79,7 @@ namespace gl
         // Fretboard marks while calibrating (what to play next).
         std::vector<FretboardComponent::Mark> marks() const;
         std::function<void()> onDisplayChanged;
+        std::function<void (const std::vector<MidiNote>&)> onTuningWanted; // a loaded preset was made for this tuning
 
         void resized() override;
         void paint (juce::Graphics&) override;
@@ -86,12 +87,28 @@ namespace gl
     private:
         void updateStatus();
 
+        // Calibration presets: plain-text files in the user's app data folder, shared by every project.
+        static juce::File presetFolder();
+        void refreshPresets();
+        void loadPreset (const juce::File& file);
+        void savePreset();
+        void deletePreset();
+        void showPresetMessage (const juce::String& text);
+
         GuitarLabProcessor& proc;
 
-        juce::Label modeLabel, inputLabel, safetyLabel, sensLabel, calStatus, warning, help;
+        juce::Label modeLabel, inputLabel, safetyLabel, sensLabel, calStatus, warning, help, presetLabel;
+        juce::ComboBox presetBox;
+        juce::TextEditor presetName;
+        juce::TextButton savePresetButton { "Save as preset" }, deletePresetButton { "Delete" };
+        juce::Array<juce::File> presetFiles;
+        juce::uint32 deleteArmedAt = 0;   // Delete needs a second click within 3 seconds
+        juce::String presetMessage;       // shown in the warning line for a few seconds
+        juce::uint32 presetMessageAt = 0;
         juce::ComboBox modeBox, inputBox;
         juce::Slider safety, sensitivity;
-        juce::ToggleButton bendsToggle { "Track bends / slides / vibrato" }, monitorToggle { "Hear guitar" };
+        juce::ToggleButton bendsToggle { "Track bends / slides / vibrato" }, monitorToggle { "Hear guitar" },
+                           soundToggle { "Built-in sound" };
         juce::TextButton calibrateButton { "Calibrate..." };
 
         TunerView tuner;
@@ -106,6 +123,6 @@ namespace gl
         using APVTS = juce::AudioProcessorValueTreeState;
         std::unique_ptr<APVTS::ComboBoxAttachment> modeAtt, inputAtt;
         std::unique_ptr<APVTS::SliderAttachment> safetyAtt, sensAtt;
-        std::unique_ptr<APVTS::ButtonAttachment> bendsAtt, monitorAtt;
+        std::unique_ptr<APVTS::ButtonAttachment> bendsAtt, monitorAtt, soundAtt;
     };
 }

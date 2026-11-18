@@ -20,6 +20,9 @@ namespace gl
         // Re-reads everything from the processor (after a project is loaded).
         void refresh();
 
+        // Switches to this tuning (and string count), as if the player chose it here. Used by calibration presets.
+        void applyTuning (const std::vector<MidiNote>& openNotes);
+
         // Pitch classes of the chosen scale (empty map when the overlay is off).
         std::map<PitchClass, juce::Colour> scaleLayer() const;
         bool showAllNames() const { return namesToggle.getToggleState(); }

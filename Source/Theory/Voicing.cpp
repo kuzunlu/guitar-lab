@@ -71,7 +71,8 @@ namespace gl
     {
         struct Search
         {
-            const Chord& chord;
+            PitchClass root;
+            int bass;
             const Instrument& inst;
             const VoicingOptions& opt;
             std::vector<PitchClass> chordPcs;
@@ -89,6 +90,11 @@ namespace gl
             score += innerMutes * 1.2;
             score += missingFifth ? 0.4 : 0.0;
             score -= v.numPlayed() * 0.35;
+
+            // Open strings with the hand far up the neck: possible, but an unusual sound (and hard to strum cleanly).
+            int opens = 0;
+            for (int f : v.frets) if (f == 0) ++opens;
+            score += opens * std::max (0, v.lowestFrettedFret() - 4) * 0.25;
 
             // Doubling the 3rd sounds thin and muddy: small penalty per extra copy.
             int thirds = 0;
@@ -125,8 +131,12 @@ namespace gl
             if (innerMutes > (s.opt.allowInnerMutes ? 1 : 0))
                 return;
 
-            // Bass note = note on the lowest played string (highest index).
-            if (s.opt.rootInBass && pitchClassOf (s.inst.noteAt ({ last, frets[(size_t) last] })) != s.chord.root)
+            // Bass note = the lowest PITCH (an open string can be lower than a high fret on a thicker string).
+            // A slash chord asks for its own bass.
+            MidiNote lowNote = 999;
+            for (auto p : v.positions()) lowNote = std::min (lowNote, s.inst.noteAt (p));
+            const PitchClass lowest = pitchClassOf (lowNote);
+            if (s.bass >= 0 ? lowest != s.bass : (s.opt.rootInBass && lowest != s.root))
                 return;
 
             // Required notes present?
@@ -153,7 +163,7 @@ namespace gl
             if (! s.seen.insert (frets).second)
                 return;
 
-            const PitchClass fifth = wrap12 (s.chord.root + 7);
+            const PitchClass fifth = wrap12 (s.root + 7);
             const bool chordHasFifth = std::find (s.chordPcs.begin(), s.chordPcs.end(), fifth) != s.chordPcs.end();
             const bool missingFifth = chordHasFifth && ! present.count (fifth);
 
@@ -200,13 +210,21 @@ namespace gl
 
     std::vector<Voicing> findVoicings (const Chord& chord, const Instrument& inst, const VoicingOptions& opt, int maxResults)
     {
-        Search s { chord, inst, opt, chord.pitchClasses(), {}, {}, {} };
+        ShapeRequest r;
+        r.root = chord.root;
+        r.pitchClasses = chord.pitchClasses();
 
         // Required: everything except the 5th (it may be dropped in chords with 4+ notes).
         const PitchClass fifth = wrap12 (chord.root + 7);
-        for (auto p : s.chordPcs)
-            if (! (opt.dropFifthIfNeeded && s.chordPcs.size() >= 4 && p == fifth))
-                s.required.push_back (p);
+        for (auto p : r.pitchClasses)
+            if (! (opt.dropFifthIfNeeded && r.pitchClasses.size() >= 4 && p == fifth))
+                r.required.push_back (p);
+        return findShapes (r, inst, opt, maxResults);
+    }
+
+    std::vector<Voicing> findShapes (const ShapeRequest& r, const Instrument& inst, const VoicingOptions& opt, int maxResults)
+    {
+        Search s { r.root, r.bass, inst, opt, r.pitchClasses, r.required, {}, {} };
 
         std::vector<int> frets ((size_t) inst.numStrings(), kMuted);
         const int lastStart = std::max (opt.minFret, opt.maxFret - opt.maxSpan);

@@ -375,6 +375,13 @@ namespace gl
         if (onChange) onChange();
     }
 
+    void InstrumentBar::applyTuning (const std::vector<MidiNote>& openNotes)
+    {
+        if (openNotes == proc.instrument.tuning() || ! proc.instrument.setTuning (openNotes))
+            return;
+        instrumentEdited();
+    }
+
     void InstrumentBar::stringsChanged()
     {
         if (updating) return;

@@ -3,6 +3,7 @@
 #include "Theory/Instrument.h"
 #include "Tracking/Calibration.h"
 #include "Tracking/PitchDetector.h"
+#include "Tracking/PolyTracker.h"
 #include "Tracking/Spectrum.h"
 
 #include <array>
@@ -12,7 +13,8 @@
 
 namespace gl
 {
-    enum class TrackMode { Off = 0, Mono = 1, Hex = 2 };
+    // Poly = normal guitar on one cable, several notes at once (PolyTracker). Values match the saved parameter.
+    enum class TrackMode { Off = 0, Mono = 1, Hex = 2, Poly = 3 };
 
     struct TrackerSettings
     {
@@ -106,6 +108,7 @@ namespace gl
         std::vector<Voice> voices;
         std::vector<float> mix;
         int handFret = 5;
+        PolyTracker poly;     // Poly mode: makes the notes (voice 0 only feeds the tuner display)
     };
 
     // =======================================================================
@@ -122,7 +125,7 @@ namespace gl
             auto& v = voices[(size_t) vi];
             const float* src = nullptr;
 
-            if (settings.mode == TrackMode::Mono && settings.monoInput < 0 && numInputs > 1)
+            if (settings.mode != TrackMode::Hex && settings.monoInput < 0 && numInputs > 1)
             {
                 // Mix all inputs into one signal.
                 const int n = std::min (numSamples, (int) mix.size());
@@ -160,8 +163,12 @@ namespace gl
                 }
 
                 frame (f);
-                hop (v, scaled, offset, emit);
+                if (settings.mode != TrackMode::Poly)
+                    hop (v, scaled, offset, emit);
             });
+
+            if (settings.mode == TrackMode::Poly)
+                poly.process (src, numSamples, emit);
         }
     }
 
@@ -284,6 +291,8 @@ namespace gl
     template <typename Emit>
     void GuitarTracker::allOff (Emit&& emit)
     {
+        if (settings.mode == TrackMode::Poly)
+            poly.allOff (emit);
         for (auto& v : voices)
         {
             stopNote (v, 0, emit);

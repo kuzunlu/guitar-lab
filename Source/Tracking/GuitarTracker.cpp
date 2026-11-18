@@ -16,7 +16,15 @@ namespace gl
         if (settings.mode == TrackMode::Off)
             return;
 
-        if (settings.mode == TrackMode::Mono)
+        // Calibration listens like mono mode (one pitch at a time), so the same calibration fits both.
+        if (settings.mode == TrackMode::Poly && settings.features)
+            settings.mode = TrackMode::Mono;
+
+        if (settings.mode == TrackMode::Poly)
+            poly.prepare (sampleRate, inst, cal, { settings.stableFrames, settings.sensitivity, settings.trackBends,
+                                                   settings.bendRange, settings.firstChannel });
+
+        if (settings.mode != TrackMode::Hex)
         {
             // One detector for the whole guitar range (lowest open string to fret 24, plus room for bends).
             int lo = 127, hi = 0;
@@ -64,6 +72,7 @@ namespace gl
             v.chordNotes.fill (-1);
         }
         handFret = 5;
+        poly.reset();
     }
 
     double GuitarTracker::centsCorrection (const Voice& v) const
@@ -93,7 +102,7 @@ namespace gl
         // Even out dead spots and hot spots measured in a full calibration.
         if (auto* p = cal.position (string, fret); p != nullptr && p->level > 0.0f && cal.typicalLevel > 0.0f)
             peak *= std::clamp (cal.typicalLevel / p->level, 0.5f, 2.0f);
-        return cal.velocityFromPeak (peak);
+        return cal.velocityFromPeak (peak, string);
     }
 
     float GuitarTracker::leakLevel (const Voice& v) const

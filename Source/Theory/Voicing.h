@@ -40,6 +40,16 @@ namespace gl
     // All playable voicings, best first. Every result has the root, 3rd and 7th (when the chord has one).
     std::vector<Voicing> findVoicings (const Chord& chord, const Instrument& inst, const VoicingOptions& options, int maxResults = 40);
 
+    // Any set of notes: shapes that use only these pitch classes and contain all the required ones.
+    struct ShapeRequest
+    {
+        PitchClass root = 0;
+        std::vector<PitchClass> pitchClasses;   // root first, then 3rd... (the 2nd entry counts as the 3rd)
+        std::vector<PitchClass> required;
+        int bass = -1;                          // slash chord: this note must be the lowest (-1 = root, if rootInBass)
+    };
+    std::vector<Voicing> findShapes (const ShapeRequest& request, const Instrument& inst, const VoicingOptions& options, int maxResults = 40);
+
     // Picks one voicing per chord so the hand moves as little as possible.
     // startFret: the area of the neck to start near.
     std::vector<Voicing> voiceLead (const std::vector<Chord>& chords, const Instrument& inst,

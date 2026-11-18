@@ -51,6 +51,7 @@ add_library(GuitarLabCore STATIC
     Source/Theory/Reharm.cpp
     Source/Theory/Voicing.cpp
     Source/Theory/Trainer.cpp
+    Source/Theory/ChordFinder.cpp
     Source/Midi/Phrase.cpp
     Source/Midi/MidiRenderer.cpp
     Source/Midi/PhraseRecorder.cpp
@@ -58,6 +59,7 @@ add_library(GuitarLabCore STATIC
     Source/Tracking/Spectrum.cpp
     Source/Tracking/Calibration.cpp
     Source/Tracking/GuitarTracker.cpp
+    Source/Tracking/PolyTracker.cpp
 )
 target_include_directories(GuitarLabCore PUBLIC Source)
 
@@ -66,18 +68,18 @@ target_include_directories(GuitarLabCore PUBLIC Source)
 # ---------------------------------------------------------------------------
 juce_add_plugin(GuitarLab
     VERSION                    ${GUITAR_LAB_VERSION_NUMBER}
-    COMPANY_NAME               "kuzunlu"
+    COMPANY_NAME               "Kursat"
     PLUGIN_MANUFACTURER_CODE   Kuzu
     PLUGIN_CODE                GtLb
     PRODUCT_NAME               "Guitar Lab"
     FORMATS                    VST3 Standalone
-    IS_SYNTH                   TRUE
+    IS_SYNTH                   FALSE
     NEEDS_MIDI_INPUT           TRUE
     NEEDS_MIDI_OUTPUT          TRUE
     IS_MIDI_EFFECT             FALSE
     EDITOR_WANTS_KEYBOARD_FOCUS TRUE
     COPY_PLUGIN_AFTER_BUILD    FALSE
-    VST3_CATEGORIES            Instrument Generator
+    VST3_CATEGORIES            Fx
 )
 
 target_sources(GuitarLab PRIVATE
@@ -91,6 +93,7 @@ target_sources(GuitarLab PRIVATE
     Source/UI/TrainerPanel.cpp
     Source/UI/PhrasePanel.cpp
     Source/UI/TrackerPanel.cpp
+    Source/UI/ShapesPanel.cpp
 )
 
 target_compile_definitions(GuitarLab PUBLIC

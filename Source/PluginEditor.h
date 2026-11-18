@@ -6,9 +6,12 @@
 #include "UI/PhrasePanel.h"
 #include "UI/PianoComponent.h"
 #include "UI/ReharmPanel.h"
+#include "UI/ShapesPanel.h"
 #include "UI/Theme.h"
 #include "UI/TrackerPanel.h"
 #include "UI/TrainerPanel.h"
+
+#include <set>
 
 class GuitarLabEditor : public juce::AudioProcessorEditor,
                         private juce::Timer
@@ -21,7 +24,7 @@ public:
     void resized() override;
 
 private:
-    enum Tab { PlayTab = 0, ReharmTab = 1, TrainerTab = 2, TrackerTab = 3 };
+    enum Tab { TrackerTab = 0, PlayTab = 1, ShapesTab = 2, ReharmTab = 3, TrainerTab = 4 };
 
     // TabbedComponent only tells subclasses when the tab changes.
     struct Tabs : public juce::TabbedComponent
@@ -35,6 +38,7 @@ private:
     void updateDisplay();          // marks + layers on fretboard and piano for the current tab
     void instrumentChanged();
     void reloadAll();              // after a project/preset was loaded
+    void updateChordName (const std::set<gl::MidiNote>& sounding);
     int  currentTab() const { return tabs.getCurrentTabIndex(); }
 
     GuitarLabProcessor& proc;
@@ -45,10 +49,13 @@ private:
     gl::FretboardComponent fretboard;
     gl::PianoComponent     piano;
     gl::PhrasePanel        phrasePanel;
+    gl::ShapesPanel        shapesPanel;
     gl::ReharmPanel        reharmPanel;
     gl::TrainerPanel       trainerPanel;
     gl::TrackerPanel       trackerPanel;
     Tabs tabs;
+    juce::Label chordName;                // chord analyser, at the right of the tab row
+    std::set<gl::MidiNote> lastChordNotes;
 
     std::vector<int> lastTuning;
     std::vector<gl::FretPos> pianoSpots;  // spots shown after clicking a piano key

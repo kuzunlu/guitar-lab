@@ -20,8 +20,13 @@ namespace gl
     {
     public:
         // size must be a power of two. Allocates: call outside the audio thread.
-        void prepare (int size);
+        // fallLength > 0: low-latency window (slow rise, fast fall over the last fallLength samples), so the
+        // newest sound counts most. 0 = normal Hann window.
+        void prepare (int size, int fallLength = 0);
         int  size() const { return n; }
+
+        const std::vector<float>& magnitudes() const { return mags; } // size() / 2 bins
+        const std::vector<float>& windowShape() const { return window; }
 
         // Uses exactly size() samples, oldest first.
         void compute (const float* samples);
