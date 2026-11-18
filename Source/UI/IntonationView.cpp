@@ -127,7 +127,7 @@ namespace gl
                 {
                     g.setColour (juce::Colours::black);
                     g.setFont (juce::FontOptions (std::min (11.0f, ch * 0.5f)));
-                    g.drawText ((c > 0 ? "+" : "") + juce::String ((int) std::lround (c)), cell, juce::Justification::centred);
+                    g.drawText ((std::lround (c) > 0 ? "+" : "") + juce::String ((int) std::lround (c)), cell, juce::Justification::centred);
                 }
             }
         }

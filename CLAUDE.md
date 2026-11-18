@@ -13,12 +13,14 @@ Tab order (= the `Tab` enum in `PluginEditor.h`, = the `addTab` order):
    Calibration wizard: tuning first, then Quick (silence, open strings, 12th fret, soft/hard) or Full
    (every fret on every string, ~37 chords in mono/poly, soft and hard picking on every string).
    Calibrations can be saved and loaded as **presets** (files, shared by all projects).
+   **Intonation report** (`UI/IntonationView`): from a Full calibration, how far every fret plays from its open string.
 2. **Play & Write** – play the neck live (drag = bend / slide) and write MIDI phrases (up to 512 bars) with
    hammer-ons, pull-offs, taps, palm mute, dead notes, harmonics, bends, slides, vibrato and strummed chords.
    **Record guitar** writes the tracked notes into the phrase as editable tab (`PhraseRecorder`), with an optional
    1-bar count-in. Practice/edit tools: loop a section (drag in the ruler), metronome, zoom, multi-select
    (Ctrl + click, box drag), copy/cut/paste, move/transpose with buttons or keys. Export: MIDI, text tab, PDF,
-   MusicXML (`Midi/TabExport`).
+   MusicXML, Guitar Pro 3 (`Midi/TabExport`). Gold chord names under the bar numbers show the harmony over time
+   (`Midi/ChordTimeline`); "To Reharm Lab" sends them there.
 3. **Chord Shapes** – type or pick any chord symbol (`Cmaj7`, `F#m7b5`, `G7#9`, `D/F#`, `E7alt`) and see every
    playable shape for this tuning as chord diagrams (`parseChordName` + `findShapes`).
 4. **Reharm Lab** – type a progression (`I V vi IV`, `Dm7 G7 Cmaj7`), get substitutions
@@ -68,14 +70,16 @@ Inno Setup is not installed on the dev machine; CI installs it. Do not install i
 | Folder | What | Depends on JUCE? |
 |---|---|---|
 | `Source/Theory/` | Notes, instrument + tunings, chords + Roman numerals, reharm engine, voicing search (`findVoicings`, `findShapes` for any note set), trainer logic, `ChordFinder` (notes -> chord names, chord symbol -> notes) | **No** |
-| `Source/Midi/` | `Phrase` (the note/technique model), `MidiRenderer` (phrase -> MIDI events), `PhraseRecorder` (tracked MIDI -> phrase notes), `TabExport` (tab text for a note; text tab, PDF and MusicXML files) | **No** |
+| `Source/Midi/` | `Phrase` (the note/technique model), `MidiRenderer` (phrase -> MIDI events), `PhraseRecorder` (tracked MIDI -> phrase notes), `TabExport` (tab text for a note; text tab, PDF, MusicXML and GP3 files), `ChordTimeline` (phrase -> chord names over time) | **No** |
 | `Source/Tracking/` | `PitchDetector` (YIN on a downsampled copy), `Spectrum` (FFT, tone colour, chroma), `Calibration` + `CalibrationSession` (wizard logic), `GuitarTracker` (audio -> notes/bends/velocity/chords; runs `PolyTracker` in poly mode) | **No** |
 | `Source/Audio/` | `PluckSynth`: small built-in plucked-string sound (one voice per MIDI channel) | Yes |
-| `Source/UI/` | Fretboard, piano, top bar, the five tab panels (`ShapesPanel` = Chord Shapes), theme + tooltip look | Yes |
+| `Source/UI/` | Fretboard, piano, top bar, the five tab panels (`ShapesPanel` = Chord Shapes), `IntonationView`, theme + tooltip look. The top bar's **Manual** button opens `Manual/index.html` next to the app, else the latest GitHub release | Yes |
 | `Source/PluginProcessor.*` | Parameters, state save/load, playback in sync with the host, live notes | Yes |
 | `Source/PluginEditor.*` | Lays out the window and routes fretboard/piano clicks to the open tab | Yes |
 | `Tests/CoreTests.cpp` | Plain asserts for `Theory/`, `Midi/` and `Tracking/` (no framework) | No |
 | `installer/GuitarLab.iss` | Inno Setup 6 installer script | - |
+| `docs/manual/` | The user manual (`index.html` + `img/`). Shipped in the release zip and the installer | - |
+| `tools/make-manual-images.bat` | Makes `docs/manual/img` from the real plugin window, off-screen (`tools/screenshots`, CMake option `GUITAR_LAB_SCREENSHOTS`, build folder `build-manual`). Run `build.bat` first | - |
 | `build.bat` | Local + CI build (CMake + Ninja with Visual Studio's toolchain), then runs the tests | - |
 | `.github/workflows/build.yml` | CI on every push; a `v*` tag also publishes a GitHub Release | - |
 
@@ -160,7 +164,8 @@ Keep `Theory/`, `Midi/` and `Tracking/` free of JUCE, so they stay testable and 
   on a grid of 16ths (or triplets, only when notes really sit on triplets); the notes of one strummed chord (same
   `group`) are written in one column. The PDF is written by our own tiny writer (standard Helvetica fonts, lines,
   white boxes, text; no library): bars get the width their notes need and lines are stretched to the page; palm
-  mute is "P.M. - - -" above the staff. Guitar Pro (.gp) is not written: Guitar Pro imports the MusicXML.
+  mute is "P.M. - - -" above the staff. Guitar Pro 3 (.gp3) is written by hand too (up to 7 strings, no palm mute in
+  that format); the newer .gp format is not written.
 - **Practice tools in the processor:** `loopStart` / `loopEnd` (beats, atomics) loop Guitar Lab's own Play;
   `startCountIn()` plays one bar of clicks, then starts Play at the given bar and (for Record guitar) sets
   `recordingGuitar` in the same block, so the recording uses the transport clock. The metronome is the
@@ -182,6 +187,9 @@ Keep `Theory/`, `Midi/` and `Tracking/` free of JUCE, so they stay testable and 
   **Guitar-Lab-Standalone** -> build the installer with Inno Setup (installed via choco if missing)
   -> upload **Guitar-Lab-Installer**. Actions are pinned by commit SHA with a version comment
   (same pins as the owner's stream-bridge repo).
+- **Every release ships an updated user manual.** Before tagging: update `docs/manual/index.html` for every
+  feature change, run `tools\make-manual-images.bat` so the pictures match, and check that every `<img>` exists.
+  `.gitattributes` keeps `*.pdf` binary (else Windows checkout breaks the example PDF in the manual).
 - Release: `git tag vX.Y.Z && git push origin vX.Y.Z` -> CI publishes a GitHub Release with
   `Guitar-Lab-vX.Y.Z.zip` (VST3 folder + standalone exe) and `Guitar-Lab-Setup-X.Y.Z.exe`.
   **Never push a tag unless the owner asks.**
