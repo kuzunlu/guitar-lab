@@ -252,9 +252,9 @@ namespace gl
             const int score = added + 2 * moved;
             if (fits && inside == numHeard && score < bestScore) { best = &sh; bestScore = score; }
         }
-        // Nothing to add when the notes heard already are a whole shape on their strings. Never move more than
-        // one note: completion only fills in octave copies, it does not re-finger the chord.
-        if (best == nullptr || bestScore == 0 || bestScore > best->size - numHeard + 2) return;
+        // Nothing to add when the notes heard already are a whole shape on their strings. When the pitches fit a shape
+        // exactly, its strings are a better guess than ours, so notes may move to them.
+        if (best == nullptr || bestScore == 0) return;
 
         // Notes on the wrong string (or on a string the shape does not use) stop; then every shape note starts
         // on its own string.
@@ -634,8 +634,9 @@ namespace gl
         if (count > 0)
             startNotes (count);
 
-        // ~75 and ~130 ms into a strum (3 or more strings): fill in octave notes hidden in the harmonics of a known shape.
-        if ((sinceBurst == 7 || sinceBurst == 12) && startedInBurst >= 3)
+        // In a strum of 3 or more strings: fill in octave notes hidden in the harmonics of a known shape, as soon as
+        // a new note starts (no waiting), and again ~75 and ~130 ms in.
+        if (startedInBurst >= 3 && sinceBurst <= 12 && (count > 0 || sinceBurst == 7 || sinceBurst == 12))
             completeChord();
 
         // A pick attack that no new note explains (~50 ms later): a ringing note was picked again (tremolo picking,

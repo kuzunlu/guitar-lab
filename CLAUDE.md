@@ -136,8 +136,10 @@ Keep `Theory/`, `Midi/` and `Tracking/` free of JUCE, so they stay testable and 
   enough share of the energy, not a harmonic "ghost" of a louder note (`isGhost`), own harmonic peaks
   (`hasHarmonicPeaks`), not inside a ringing note's bend (`isClaimed`). Strings: a small search
   (`startNotes`) - one note per string, hand span, near the hand, notes of the same strum may move string.
-  ~75 ms into a strum of 3+ notes, `completeChord` adds octave notes hidden in a known shape (common shapes +
-  taught chords). Re-picks: a pick attack that no new note explains. Bends: exact pitch from a 512-point FFT.
+  In a strum of 3+ notes, `completeChord` adds octave notes hidden in a known shape (common shapes + taught chords)
+  as soon as a new note starts (and again at ~75 and ~130 ms); when the pitches fit a shape exactly, notes move to
+  the shape's strings. Real octaves in chords look like harmonic ghosts in the spectrum, so the shape is the proof.
+  Re-picks: a pick attack that no new note explains. Bends: exact pitch from a 512-point FFT.
   The wizard always listens like mono (`GuitarTracker::prepare` swaps Poly for Mono while calibrating), so one
   calibration fits mono and poly. `TrackMode` values are saved in projects: only add new modes at the end.
 - The poly rules were tuned on synthetic plucks (Karplus-Strong with a triangle pick shape at many pick

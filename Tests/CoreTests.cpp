@@ -1405,6 +1405,7 @@ static void testPolyTracking()
         { "E minor (022000)",  { 40, 47, 52, 55, 59, 64 }, { 7, 6, 5, 4, 3, 2 } },
         { "G major (320003)",  { 43, 47, 50, 55, 59, 67 }, { 7, 6, 5, 4, 3, 2 } },
         { "A minor (x02210)",  { 45, 52, 57, 60, 64 },     { 6, 5, 4, 3, 2 } },
+        { "F barre (133211)",  { 41, 48, 53, 57, 60, 65 }, { 7, 6, 5, 4, 3, 2 } },
         { "Power chord A5",    { 45, 52 },                 {} }, // open (x02) or 5th fret (57): both fine
     };
     for (const auto& c : chords)
@@ -1421,6 +1422,34 @@ static void testPolyTracking()
         for (size_t i = 0; i < c.channels.size(); ++i)
             checkEq (channelOfNote (ev, c.lowToHigh[i]), c.channels[i],
                      std::string ("poly: ") + c.name + " note " + std::to_string (c.lowToHigh[i]) + " on its string's channel");
+    }
+
+    // Barre chords whose octave strings are quiet: hidden in the harmonics of the lower notes, so chord completion
+    // fills them in. It must not wait: every note within 130 ms of the first string, each on its own string.
+    {
+        struct Hidden { const char* name; std::vector<int> lowToHigh; std::vector<int> channels; };
+        const std::vector<Hidden> hidden {
+            { "F barre (133211)",  { 41, 48, 53, 57, 60, 65 }, { 7, 6, 5, 4, 3, 2 } },
+            { "Bb barre (x13331)", { 46, 53, 58, 62, 65 },     { 6, 5, 4, 3, 2 } },
+        };
+        for (const auto& c : hidden)
+        {
+            std::vector<float> audio;
+            for (size_t i = 0; i < c.lowToHigh.size(); ++i)
+            {
+                bool octave = false;
+                for (size_t k = 0; k < i; ++k) if ((c.lowToHigh[i] - c.lowToHigh[k]) % 12 == 0) octave = true;
+                mixAt (audio, ksString (c.lowToHigh[i], 1.0, octave ? 0.03 : 0.22, (unsigned) (i + 3)), i * 0.02);
+            }
+            const auto ev = runPoly (audio);
+            const auto early = pitchesStarted (ev, 0, (int) (0.13 * kRate));
+            check (listOf (early) == listOf (c.lowToHigh), std::string ("poly: ") + c.name + " with quiet octaves complete within 130 ms (got "
+                                                          + listOf (early) + ")");
+            check (listOf (pitchesStarted (ev)) == listOf (c.lowToHigh), std::string ("poly: ") + c.name + " with quiet octaves has no extra notes");
+            for (size_t i = 0; i < c.channels.size(); ++i)
+                checkEq (channelOfNote (ev, c.lowToHigh[i]), c.channels[i],
+                         std::string ("poly: ") + c.name + " with quiet octaves, note " + std::to_string (c.lowToHigh[i]) + " on its string's channel");
+        }
     }
 
     // Arpeggio: one note every 150 ms, all ringing. Each note starts soon after its pluck.
