@@ -30,6 +30,7 @@ namespace gl
         auto area = getLocalBounds().toFloat().withTrimmedTop (18.0f).reduced (2.0f);
         double total = 0;
         for (auto& c : chords) total += c.beats;
+        if (dragEdge >= 0) total = std::max (total, dragTotal);
         if (total <= 0) return {};
 
         double before = 0;
@@ -85,18 +86,77 @@ namespace gl
         }
     }
 
+    int ChordStrip::edgeAt (juce::Point<float> p) const
+    {
+        if (onLengthsChanged == nullptr) return -1;
+        for (int i = 0; i < (int) chords.size(); ++i)
+        {
+            const auto r = cardBounds (i);
+            if (p.y >= r.getY() && p.y <= r.getBottom() && std::abs (p.x - (r.getRight() + 2.0f)) <= 5.0f)
+                return i;
+        }
+        return -1;
+    }
+
+    void ChordStrip::mouseMove (const juce::MouseEvent& e)
+    {
+        setMouseCursor (edgeAt (e.position) >= 0 ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::NormalCursor);
+    }
+
     void ChordStrip::mouseDown (const juce::MouseEvent& e)
     {
-        const int i = cardAt (e.position);
-        if (i >= 0 && onClick)
-            onClick (i);
+        dragEdge = edgeAt (e.position);
+        if (dragEdge >= 0)
+        {
+            dragStartBeats.clear();
+            dragTotal = 0.0;
+            for (auto& c : chords) { dragStartBeats.push_back (c.beats); dragTotal += c.beats; }
+            const auto area = getLocalBounds().toFloat().withTrimmedTop (18.0f).reduced (2.0f);
+            dragPxPerBeat = (float) (area.getWidth() / std::max (0.5, dragTotal));
+            return;
+        }
+        if (onClick)
+            onClick (cardAt (e.position));
+    }
+
+    void ChordStrip::mouseDrag (const juce::MouseEvent& e)
+    {
+        if (dragEdge < 0 || dragEdge >= (int) chords.size()) return;
+
+        // Half-beat steps (Shift: quarter beats). Every chord keeps at least one step.
+        const double step = e.mods.isShiftDown() ? 0.25 : 0.5;
+        double delta = std::round (e.getDistanceFromDragStartX() / dragPxPerBeat / step) * step;
+        const int i = dragEdge;
+        const bool last = i + 1 >= (int) chords.size();
+        delta = std::max (delta, step - dragStartBeats[(size_t) i]);
+        if (! last) delta = std::min (delta, dragStartBeats[(size_t) i + 1] - step);
+
+        chords[(size_t) i].beats = dragStartBeats[(size_t) i] + delta;
+        if (! last) chords[(size_t) i + 1].beats = dragStartBeats[(size_t) i + 1] - delta;
+        repaint();
+    }
+
+    void ChordStrip::mouseUp (const juce::MouseEvent&)
+    {
+        if (dragEdge < 0) return;
+        dragEdge = -1;
+        std::vector<double> beats;
+        for (auto& c : chords) beats.push_back (c.beats);
+        if (beats != dragStartBeats && onLengthsChanged)
+            onLengthsChanged (beats);
+        repaint();
     }
 
     juce::String ChordStrip::getTooltip()
     {
         const int i = cardAt (getMouseXYRelative().toFloat());
+        if (edgeAt (getMouseXYRelative().toFloat()) >= 0)
+            return "Change the length\nDrag this line left or right to make the chord before it shorter or longer "
+                   "(the next chord gets the rest). Half-beat steps; hold Shift for quarter beats.";
         if (i < 0)
-            return title + "\nClick a chord to hear it and see its shape on the fretboard and piano.";
+            return title + "\nClick a chord to hear it, see its shape and list only its suggestions. "
+                           "Click empty space to list all suggestions again.\n"
+                           "Drag the line between two chords to change their lengths.";
 
         const auto& tc = chords[(size_t) i];
         juce::String tip = juce::String (tc.chord.name (key.prefersFlats())) + "   (" + juce::String (romanLabel (tc.chord, key))
@@ -105,7 +165,7 @@ namespace gl
                          + "Length: " + juce::String (tc.beats, 2) + " beats";
         if (tc.substituted)
             tip << "\nWhy: " << juce::String (tc.reason);
-        tip << "\nClick to hear it and show its voicing on the fretboard.";
+        tip << "\nClick to hear it, show its voicing on the fretboard and list only its suggestions.";
         return tip;
     }
 
@@ -126,11 +186,14 @@ namespace gl
             "Type chords split by spaces, dashes, commas or bar lines.\n"
             "Roman numerals (in the key on the right): I V vi IV, ii7 V7 Imaj7, bVII, iv, V/V, viio7, iiø7\n"
             "Or chord names: C G Am F, Dm7 G7 Cmaj7, F#m7b5, Bb7#9, Esus4\n"
-            "UPPER case numeral = major, lower case = minor. Each chord gets one bar (4 beats).");
+            "UPPER case numeral = major, lower case = minor.\n"
+            "Lengths: each chord gets one bar (4 beats). Write C:2 for 2 beats (any length: G:1.5, F:8).\n"
+            "Bar lines share a bar: | C G | Am | = C and G 2 beats each, Am 4 beats.\n"
+            "You can also drag the line between two chord cards below.");
         input.setText (proc.reharmInput, juce::dontSendNotification);
         input.setTooltip (inputLabel.getTooltip());
         input.onReturnKey = [this] { parseInput(); };
-        input.onFocusLost = [this] { parseInput(); };
+        input.onFocusLost = [this] { if (input.getText() != proc.reharmInput) parseInput(); }; // leaving the tab must not reset the result
         addAndMakeVisible (input);
 
         label (keyLabel, "Key", "Key\nThe key of the song. Roman numerals are read in this key, and the engine uses it to decide "
@@ -155,7 +218,7 @@ namespace gl
             t->setToggleState (true, juce::dontSendNotification);
             t->setTooltip (juce::String (subKindDescription ((SubKind) k))
                            + "\n\nTick = 'Reharmonize' may use this kind of change. The suggestion list below is filtered the same way.");
-            t->onClick = [this] { suggestionList.updateContent(); suggestionList.repaint(); };
+            t->onClick = [this] { suggestionList.updateContent(); suggestionList.repaint(); if (onHeightChanged) onHeightChanged(); };
             addAndMakeVisible (t);
         }
 
@@ -229,10 +292,22 @@ namespace gl
 
         originalStrip.title = "Your progression";
         originalStrip.onClick = [this] (int i) { selectCard (false, i); };
+        originalStrip.onLengthsChanged = [this] (const std::vector<double>& beats)
+        {
+            // Same as typing the new lengths: the text is rewritten and read again.
+            for (size_t i = 0; i < beats.size() && i < original.size(); ++i) original[i].beats = beats[i];
+            input.setText (progressionToText (original, currentKey().prefersFlats()), juce::dontSendNotification);
+            parseInput();
+        };
         addAndMakeVisible (originalStrip);
 
         resultStrip.title = "Reharmonized (yellow = changed)";
         resultStrip.onClick = [this] (int i) { selectCard (true, i); };
+        resultStrip.onLengthsChanged = [this] (const std::vector<double>& beats)
+        {
+            for (size_t i = 0; i < beats.size() && i < result.size(); ++i) result[i].beats = beats[i];
+            revoice();
+        };
         addAndMakeVisible (resultStrip);
 
         label (suggestionsLabel, "Single suggestions (double-click to apply to the bottom row)",
@@ -244,6 +319,11 @@ namespace gl
         suggestionList.setTooltip (suggestionsLabel.getTooltip());
         addAndMakeVisible (suggestionList);
 
+        showAllButton.setTooltip ("Show all\nThe list shows only the suggestions for the selected chord. "
+                                  "Click to list the suggestions for every chord again.");
+        showAllButton.onClick = [this] { selectCard (selectedInResult, -1); };
+        addChildComponent (showAllButton);
+
         applyButton.setTooltip ("Apply suggestion\nApplies the selected suggestion to the bottom row.");
         applyButton.onClick = [this]
         {
@@ -252,7 +332,22 @@ namespace gl
         };
         addAndMakeVisible (applyButton);
 
-        parseInput();
+        memory.remember (amount, "amount");
+        memory.remember (span, "stretch");
+        memory.remember (area, "area");
+        memory.remember (rootBass, "rootBass");
+        memory.remember (openStrings, "openStrings");
+        for (int k = 0; k < kindToggles.size(); ++k)
+            memory.remember (*kindToggles[k], juce::Identifier ("kind" + juce::String (k)));
+        refresh();
+    }
+
+    juce::String ReharmPanel::workKey() const
+    {
+        juce::StringArray tuning;
+        for (auto n : proc.instrument.tuning()) tuning.add (juce::String (n));
+        return input.getText() + "|" + juce::String (keyRoot.getSelectedId()) + "|" + juce::String (keyMode.getSelectedId())
+             + "|" + tuning.joinIntoString (",");
     }
 
     // -----------------------------------------------------------------------
@@ -274,18 +369,23 @@ namespace gl
 
     void ReharmPanel::parseInput()
     {
+        readOriginal();
+        result = original;
+        selectedIndex = -1;
+        revoice();
+    }
+
+    void ReharmPanel::readOriginal()
+    {
         proc.reharmInput    = input.getText();
         proc.reharmKeyTonic = keyRoot.getSelectedId() - 1;
         proc.reharmKeyMinor = keyMode.getSelectedId() == 2;
 
         std::string err;
-        const auto chords = parseProgression (input.getText().toStdString(), currentKey(), &err);
+        const auto chords = parseTimedProgression (input.getText().toStdString(), currentKey(), &err);
         errorLabel.setText (chords.empty() ? juce::String (err) : juce::String(), juce::dontSendNotification);
 
-        original = toTimed (chords);
-        result = original;
-        selectedIndex = -1;
-        revoice();
+        original = chords;
     }
 
     void ReharmPanel::runReharm()
@@ -308,6 +408,12 @@ namespace gl
 
         voicings = voiceLead (chords, proc.instrument, voicingOptions(), (int) area.getValue());
         voicingChoice.assign (result.size(), -1);
+        updateView();
+    }
+
+    void ReharmPanel::updateView()
+    {
+        proc.work.reharmFor = workKey();
 
         // Suggestions for the current bottom row.
         suggestions = findSuggestions (result, currentKey());
@@ -325,14 +431,30 @@ namespace gl
             shownVoicing = {};
 
         suggestionList.updateContent();
+        updateSuggestionHeader();
         repaint();
         if (onDisplayChanged) onDisplayChanged();
+        if (onHeightChanged) onHeightChanged();
     }
 
     void ReharmPanel::selectCard (bool resultRow, int index)
     {
         selectedInResult = resultRow;
         selectedIndex = index;
+        suggestionList.deselectAllRows();
+        suggestionList.updateContent();
+        updateSuggestionHeader();
+        if (onHeightChanged) onHeightChanged();
+
+        if (index < 0)
+        {
+            shownVoicing = {};
+            originalStrip.selected = resultStrip.selected = -1;
+            originalStrip.repaint();
+            resultStrip.repaint();
+            if (onDisplayChanged) onDisplayChanged();
+            return;
+        }
 
         if (resultRow && index < (int) voicings.size())
             shownVoicing = voicings[(size_t) index];
@@ -370,6 +492,7 @@ namespace gl
 
     void ReharmPanel::playVoicing (const Voicing& v)
     {
+        proc.allLiveNotesOff(); // a new chord cuts off the one before
         for (int s = 0; s < (int) v.frets.size(); ++s)
             if (v.frets[(size_t) s] != kMuted)
                 proc.liveNoteOn (s, v.frets[(size_t) s]);
@@ -451,34 +574,81 @@ namespace gl
         input.setText (proc.reharmInput, juce::dontSendNotification);
         keyRoot.setSelectedId (proc.reharmKeyTonic + 1, juce::dontSendNotification);
         keyMode.setSelectedId (proc.reharmKeyMinor ? 2 : 1, juce::dontSendNotification);
-        parseInput();
+
+        // The window was closed and opened again (same input, key and tuning): keep the result, the voicings
+        // and the selection as they were. Otherwise start again from the typed progression.
+        if (proc.work.reharmFor == workKey() && ! result.empty() && voicings.size() == result.size())
+        {
+            readOriginal();
+            updateView();
+        }
+        else
+            parseInput();
+    }
+
+    void ReharmPanel::restoreUi()
+    {
+        memory.restoreAll();
+        refresh();
     }
 
     // -----------------------------------------------------------------------
     // Suggestion list (only ticked kinds)
     // -----------------------------------------------------------------------
+    int ReharmPanel::filterIndex() const
+    {
+        if (selectedIndex < 0) return -1;
+        if (selectedInResult) return selectedIndex < (int) result.size() ? selectedIndex : -1;
+        if (selectedIndex >= (int) original.size()) return -1;
+
+        // A chord in the top row: the bottom-row chord that sounds at the same beat.
+        double start = 0.0;
+        for (int k = 0; k < selectedIndex; ++k) start += original[(size_t) k].beats;
+        double at = 0.0;
+        for (int k = 0; k < (int) result.size(); ++k)
+        {
+            if (start < at + result[(size_t) k].beats - 1.0e-9) return k;
+            at += result[(size_t) k].beats;
+        }
+        return -1;
+    }
+
+    bool ReharmPanel::isListed (const Suggestion& s) const
+    {
+        const int only = filterIndex();
+        return kindToggles[(int) s.kind]->getToggleState() && (only < 0 || s.index == only);
+    }
+
+    const Suggestion* ReharmPanel::listedSuggestion (int row) const
+    {
+        for (auto& s : suggestions)
+            if (isListed (s) && row-- == 0)
+                return &s;
+        return nullptr;
+    }
+
+    void ReharmPanel::updateSuggestionHeader()
+    {
+        const int only = filterIndex();
+        showAllButton.setVisible (only >= 0);
+        suggestionsLabel.setText (only < 0 ? juce::String ("Single suggestions (double-click to apply to the bottom row)")
+                                           : "Suggestions for chord " + juce::String (only + 1) + " ("
+                                             + juce::String (result[(size_t) only].chord.name (currentKey().prefersFlats()))
+                                             + ") only - double-click to apply",
+                                  juce::dontSendNotification);
+    }
+
     int ReharmPanel::getNumRows()
     {
         int count = 0;
         for (auto& s : suggestions)
-            if (kindToggles[(int) s.kind]->getToggleState()) ++count;
+            if (isListed (s)) ++count;
         return count;
-    }
-
-    namespace
-    {
-        const Suggestion* nthVisible (const std::vector<Suggestion>& all, const juce::OwnedArray<juce::ToggleButton>& toggles, int row)
-        {
-            for (auto& s : all)
-                if (toggles[(int) s.kind]->getToggleState() && row-- == 0)
-                    return &s;
-            return nullptr;
-        }
     }
 
     void ReharmPanel::paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool isSelected)
     {
-        const auto* s = nthVisible (suggestions, kindToggles, row);
+        const auto* s = listedSuggestion (row);
         if (s == nullptr) return;
 
         if (isSelected)
@@ -501,7 +671,7 @@ namespace gl
 
     void ReharmPanel::applyRow (int row)
     {
-        const auto* s = nthVisible (suggestions, kindToggles, row);
+        const auto* s = listedSuggestion (row);
         if (s == nullptr) return;
 
         result = applySuggestion (result, *s);
@@ -511,11 +681,19 @@ namespace gl
 
     juce::String ReharmPanel::getTooltipForRow (int row)
     {
-        const auto* s = nthVisible (suggestions, kindToggles, row);
+        const auto* s = listedSuggestion (row);
         if (s == nullptr) return {};
         return juce::String (subKindName (s->kind)) + " on chord " + juce::String (s->index + 1) + "\n"
              + juce::String (s->explanation) + "\n\n" + juce::String (subKindDescription (s->kind))
              + "\n\nDouble-click to apply.";
+    }
+
+    int ReharmPanel::heightFor (int)
+    {
+        // Same rows as resized(): margin, three rows of controls, the two chord rows, the list header, then every
+        // suggestion (at least a few rows, so the empty list still looks like a list).
+        const int rows = std::max (6, getNumRows());
+        return 6 + 30 + 26 + 30 + kStripsHeight + 4 + 24 + rows * suggestionList.getRowHeight() + 4 + 6;
     }
 
     // -----------------------------------------------------------------------
@@ -555,13 +733,15 @@ namespace gl
         put (c, nextVoicingButton, 100);
         put (c, sendButton, 120);
 
-        auto strips = r.removeFromTop (juce::jmin (170, r.getHeight() / 2));
+        auto strips = r.removeFromTop (kStripsHeight);
         originalStrip.setBounds (strips.removeFromTop (strips.getHeight() / 2));
         resultStrip.setBounds (strips);
         r.removeFromTop (4);
 
         auto listHeader = row (20);
         applyButton.setBounds (listHeader.removeFromRight (130));
+        listHeader.removeFromRight (4);
+        showAllButton.setBounds (listHeader.removeFromRight (80));
         suggestionsLabel.setBounds (listHeader);
         suggestionList.setBounds (r);
     }

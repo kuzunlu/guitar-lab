@@ -396,6 +396,35 @@ static void testReharm()
     checkEq ((int) same.size(), 4, "amount 0 changes nothing");
 }
 
+static void testTimedProgression()
+{
+    Key c { 0, false };
+    auto beatsOf = [&] (const std::string& text)
+    {
+        std::string s;
+        for (auto& tc : parseTimedProgression (text, c))
+            s += tc.chord.name() + ":" + std::to_string ((int) std::lround (tc.beats * 100)) + " ";
+        return s;
+    };
+    checkEq (beatsOf ("C G Am F"), std::string ("C:400 G:400 Am:400 F:400 "), "no lengths: one bar each");
+    checkEq (beatsOf ("C:2 G:2 Am F:8"), std::string ("C:200 G:200 Am:400 F:800 "), "typed lengths");
+    checkEq (beatsOf ("| C G | Am | F |"), std::string ("C:200 G:200 Am:400 F:400 "), "two chords in a bar share it");
+    checkEq (beatsOf ("|C:3 G|Am7 D7 G|"), std::string ("C:300 G:100 Am7:133 D7:133 G:133 "), "bar: typed length first, the rest shares");
+    checkEq (beatsOf ("I-V:2 vi:1.5"), std::string ("C:200 G:200 Am:150 "), "length on a dashed word and a numeral");
+    checkEq (beatsOf ("C-7:2 F7"), std::string ("Cm7:200 F7:400 "), "C-7 with a length");
+
+    std::string err;
+    check (parseTimedProgression ("C:x G", c, &err).empty() && err.find ("C:x") != std::string::npos, "bad length is an error");
+    check (parseTimedProgression ("C:0", c).empty(), "zero length is an error");
+    check (parseTimedProgression ("I V xyz", c, &err).empty() && ! err.empty(), "bad chord is an error");
+
+    // Back to text: typed names are kept, 4 beats is not written.
+    checkEq (progressionToText (parseTimedProgression ("vi:1.5 IV Cmaj7:2", c), false), std::string ("vi:1.5 IV Cmaj7:2"), "text round trip");
+    checkEq (progressionToText (parseTimedProgression ("| C G | F |", c), false), std::string ("C:2 G:2 F"), "bars written as lengths");
+    auto subs = toTimed ({ Chord { 1, ChordQuality::Dominant7 } }, 2.25);
+    checkEq (progressionToText (subs, true), std::string ("Db7:2.25"), "engine chord written by name");
+}
+
 static void testVoicings()
 {
     Instrument g;
@@ -551,6 +580,10 @@ static void testChordTimeline()
     checkEq (names, std::string ("Am F C G "), "chord timeline: strummed chords and an arpeggio (got " + names + ")");
     check (spans.size() == 4 && spans[1].start == 4.0 && spans[3].end == 16.0, "chord timeline: chords start and end on their bars");
     checkEq (chordsForReharm (spans), std::string ("Am F C G"), "chord timeline: line for the Reharm Lab");
+    {
+        std::vector<ChordSpan> uneven { { 0, 2, "Am", {} }, { 2, 4, "Am7", {} }, { 4, 6, "F", {} }, { 6, 8, "F", {} }, { 8, 9.5, "G", {} } };
+        checkEq (chordsForReharm (uneven), std::string ("Am:2 Am7:2 F G:1.5"), "chord timeline: lengths for the Reharm Lab");
+    }
 
     // A single-note melody has no chords.
     Phrase melody;
@@ -846,32 +879,61 @@ static void testCalibration()
     CalibrationSession cs;
     cs.start (g, false, 1);
     const double hop = 0.005;
+    const AnalysisFrame quiet { 0, 0.0f, 0.0f, 0.0004f, 0.0005f };
+    // The player presses Listen, the strings are quiet for a moment, then the note comes.
+    auto listen = [&] { cs.listen(); for (int i = 0; i < 3; ++i) cs.feed (quiet, hop); };
+    auto play = [&] (double midi, int frames = 300)
+    {
+        for (int i = 0; i < frames && cs.isListening(); ++i)
+            cs.feed ({ 0, (float) midiToHz (midi), 0.97f, 0.1f, 0.3f }, hop);
+    };
+
+    // Nothing happens before Listen is pressed.
+    for (int i = 0; i < 700; ++i) cs.feed ({ 0, 0.0f, 0.0f, 0.0005f, 0.001f }, hop);
+    check (cs.step() == CalibrationSession::Step::Silence && cs.phase() == CalibrationSession::Phase::Ready,
+           "calibration waits for Listen");
 
     // Silence
+    cs.listen();
     for (int i = 0; i < 700 && cs.step() == CalibrationSession::Step::Silence; ++i)
         cs.feed ({ 0, 0.0f, 0.0f, 0.0005f, 0.001f }, hop);
     check (cs.step() == CalibrationSession::Step::OpenString, "silence step finishes");
+    check (cs.phase() == CalibrationSession::Phase::Ready, "after OK the next item waits for Listen");
+
+    // A note that still rings from before is not taken: only a new pick attack counts.
+    {
+        const double ringing = cs.expectedNote() + 5.0; // the wrong note, still sounding when Listen is pressed
+        cs.listen();
+        for (int i = 0; i < 300; ++i) cs.feed ({ 0, (float) midiToHz (ringing), 0.97f, 0.1f, 0.3f * std::pow (0.995f, (float) i) }, hop);
+        check (cs.isListening() && cs.step() == CalibrationSession::Step::OpenString && cs.status().find ("That") == std::string::npos,
+               "a note still ringing after Listen is ignored");
+        cs.stop();
+    }
 
     // Open strings: play every string 10 cents flat.
     int guard = 0;
     while (cs.step() == CalibrationSession::Step::OpenString && guard++ < 20)
     {
-        const double hz = midiToHz (cs.expectedNote() - 0.10);
-        for (int i = 0; i < 300 && ! cs.waitingForUser(); ++i)
-        {
-            const auto before = cs.stepNumber();
-            cs.feed ({ 0, (float) hz, 0.97f, 0.1f, 0.3f }, hop);
-            if (cs.stepNumber() != before) break;
-        }
+        listen();
+        play (cs.expectedNote() - 0.10);
     }
     check (cs.step() == CalibrationSession::Step::TwelfthFret, "all open strings measured");
     check (std::abs (cs.result().strings[5].centsOffset + 10.0) < 1.0, "low E measured as 10 cents flat");
 
+    // Back: the high E is forgotten and measured again, 20 cents flat this time.
+    cs.back();
+    check (cs.step() == CalibrationSession::Step::OpenString && cs.currentString() == 0 && ! cs.result().strings[0].measured,
+           "Back returns to the item before and forgets its result");
+    check (cs.result().strings[5].measured, "Back keeps the items before it");
+    listen();
+    play (cs.expectedNote() - 0.20);
+    check (cs.step() == CalibrationSession::Step::TwelfthFret && std::abs (cs.result().strings[0].centsOffset + 20.0) < 1.0,
+           "the item is measured again after Back");
+
     // 12th fret, low string: play it 80 cents sharp -> needs a decision.
     {
-        const double hz = midiToHz (cs.expectedNote() + 0.8);
-        for (int i = 0; i < 300 && ! cs.waitingForUser(); ++i)
-            cs.feed ({ 0, (float) hz, 0.97f, 0.1f, 0.3f }, hop);
+        listen();
+        play (cs.expectedNote() + 0.8);
         check (cs.waitingForUser(), "badly out-of-tune note asks the player");
         cs.skip();
     }
@@ -879,14 +941,22 @@ static void testCalibration()
     // 12th fret on the high E, in tune -> accepted, next step.
     {
         const int before = cs.stepNumber();
-        for (int i = 0; i < 300; ++i)
-            cs.feed ({ 0, (float) midiToHz (64 + 12), 0.97f, 0.1f, 0.3f }, hop); // correct: high E 12th fret
+        listen();
+        play (64 + 12); // correct: high E 12th fret
         check (cs.stepNumber() == before + 1, "12th fret on the high string accepted");
+    }
+
+    // Nothing played for more than 10 seconds: back to Ready.
+    {
+        cs.listen();
+        for (int i = 0; i < 2200; ++i) cs.feed (quiet, hop);
+        check (! cs.isListening() && cs.status().find ("Nothing clear") != std::string::npos, "listening stops after 10 s of nothing");
     }
 
     // Soft and hard: 4 plucks each.
     auto hits = [&] (float peak)
     {
+        listen();
         for (int h = 0; h < 4; ++h)
         {
             for (int i = 0; i < 20; ++i) cs.feed ({ 0, 196.0f, 0.95f, peak * 0.5f, i < 3 ? peak : peak * 0.4f }, hop);
@@ -1005,7 +1075,9 @@ static void testFullCalibration()
     CalibrationSession cs;
     cs.start (g, false, 1, true);
     const double hop = 0.005;
+    auto listen = [&] { cs.listen(); for (int i = 0; i < 3; ++i) cs.feed ({ 0, 0.0f, 0.0f, 0.0004f, 0.0005f }, hop); };
 
+    cs.listen();
     for (int i = 0; i < 700 && cs.step() == CalibrationSession::Step::Silence; ++i)
         cs.feed ({ 0, 0.0f, 0.0f, 0.0005f, 0.001f }, hop);
 
@@ -1032,15 +1104,16 @@ static void testFullCalibration()
         f.hasFeatures = true;
         f.timbre.fill (-0.5f * (float) s);
 
+        listen();
         for (int i = 0; i < 200; ++i)
         {
             cs.feed (f, hop);
-            if (cs.expectedFret() != fret || cs.currentString() != s || cs.waitingForUser()) break;
             if (s == 5 && fret == 3 && ! wrongFretTested && cs.status().find ("That was fret 4") != std::string::npos)
             {
                 wrongFretTested = true;
                 break;
             }
+            if (cs.expectedFret() != fret || cs.currentString() != s || cs.waitingForUser() || ! cs.isListening()) break;
         }
         // Let the note stop, so the next one is a new pluck.
         for (int i = 0; i < 3; ++i) cs.feed ({ 0, 0.0f, 0.0f, 0.0004f, 0.0005f }, hop);
@@ -1076,6 +1149,7 @@ static void testFullCalibration()
         AnalysisFrame f { 0, 0.0f, 0.3f, 0.1f, 0.3f };
         f.hasFeatures = true;
         f.chroma = ideal;
+        listen();
         for (int strum = 0; strum < 3; ++strum)
         {
             for (int i = 0; i < 40; ++i) cs.feed (f, hop);
@@ -1090,6 +1164,7 @@ static void testFullCalibration()
     {
         const int s = cs.currentString();
         const float peak = (cs.step() == CalibrationSession::Step::Soft ? 0.04f : 0.5f) * (s < 3 ? 1.5f : 1.0f);
+        listen();
         for (int h = 0; h < 4; ++h)
         {
             for (int i = 0; i < 20; ++i) cs.feed ({ 0, 196.0f, 0.95f, peak * 0.5f, i < 3 ? peak : peak * 0.4f }, hop);
@@ -1600,6 +1675,7 @@ int main()
     testInstrument();
     testChords();
     testReharm();
+    testTimedProgression();
     testVoicings();
     testTrainer();
     testMidi();

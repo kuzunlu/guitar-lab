@@ -137,7 +137,8 @@ namespace gl
 
         startButton.setTooltip ("Quick calibration (1-2 minutes)\nPress this when the tuning shown above matches your guitar.\n"
                                 "Learns: noise level, how each open string is really tuned, the 12th fret on the lowest and "
-                                "highest string, and your soft and hard picking. Each step moves on by itself.");
+                                "highest string, and your soft and hard picking. For each step: press Listen (or Space), "
+                                "play what is shown, see OK, then the next step appears.");
         startButton.onClick = [this] { startListening (false); };
 
         fullButton.setTooltip ("Full calibration (15-20 minutes, best results)\nEverything from the quick calibration, plus:\n"
@@ -155,22 +156,40 @@ namespace gl
         endFretsButton.setTooltip ("My guitar ends here\nPress this when the fret asked for does not exist on your guitar "
                                    "(for example fret 23 on a 22-fret guitar). The tracker will never guess frets past this one, "
                                    "on any string.");
-        endFretsButton.onClick = [this] { session.noMoreFrets(); };
+        endFretsButton.onClick = [this] { session.noMoreFrets(); tick(); };
 
         cancelButton.setTooltip ("Cancel\nStops calibration. Your old calibration (if any) is kept.");
         cancelButton.onClick = [this] { finish (false); };
 
-        retryButton.setTooltip ("Retry\nForget what was heard in this step and listen again. "
-                                "Use it after tuning a string, or when you played the wrong thing.");
-        retryButton.onClick = [this] { session.retry(); };
+        listenButton.setTooltip ("Listen (Space bar or Enter)\nPress it, then play what is shown above. Guitar Lab listens only "
+                                 "after this press, and only to a NEW note: a string that still rings from before does not count. "
+                                 "When it heard the right thing it says OK and shows the next step; press Listen again for it.\n"
+                                 "While listening, press it again to stop. After a problem it says 'Again': listen once more.\n"
+                                 "In a DAW the Space bar may start the DAW instead: then click this button.");
+        listenButton.onClick = [this]
+        {
+            if (session.isListening()) session.stop();
+            else session.listen();
+            tick();
+        };
 
-        acceptButton.setTooltip ("Accept\nKeep this measurement even though it looked wrong. "
+        backButton.setTooltip ("Back\nGo back one step, for example when you played the wrong thing and it was still accepted. "
+                               "The result of that step is forgotten; press Listen and play it again. Press Back more times "
+                               "to go further back.");
+        backButton.onClick = [this]
+        {
+            session.back();
+            if (page == Page::Done) showPage (Page::Running);
+            tick();
+        };
+
+        acceptButton.setTooltip ("Use it anyway\nKeep this measurement even though it looked wrong. "
                                  "Use it when your string is tuned like this on purpose (for example a slightly flat guitar). "
                                  "The tracker will then read that string correctly.");
-        acceptButton.onClick = [this] { session.accept(); };
+        acceptButton.onClick = [this] { session.accept(); tick(); };
 
         skipButton.setTooltip ("Skip\nSkip this step. Safe defaults are used for it.");
-        skipButton.onClick = [this] { session.skip(); };
+        skipButton.onClick = [this] { session.skip(); if (session.finished()) showPage (Page::Done); tick(); };
 
         saveButton.setTooltip ("Save calibration\nUse these results for tracking from now on. They are saved with your project.");
         saveButton.onClick = [this] { finish (true); };
@@ -178,9 +197,20 @@ namespace gl
         discardButton.setTooltip ("Discard\nThrow these results away and keep the previous calibration.");
         discardButton.onClick = [this] { finish (false); };
 
-        for (auto* b : { &startButton, &fullButton, &endFretsButton, &cancelButton, &retryButton, &acceptButton,
+        for (auto* b : { &startButton, &fullButton, &endFretsButton, &cancelButton, &listenButton, &backButton, &acceptButton,
                          &skipButton, &saveButton, &discardButton })
             addChildComponent (b);
+        setWantsKeyboardFocus (true);
+    }
+
+    bool CalibrationWizard::keyPressed (const juce::KeyPress& k)
+    {
+        if (page == Page::Running && (k == juce::KeyPress::spaceKey || k == juce::KeyPress::returnKey))
+        {
+            listenButton.triggerClick();
+            return true;
+        }
+        return false;
     }
 
     std::vector<FretPos> CalibrationWizard::spotsToPlay() const
@@ -208,20 +238,44 @@ namespace gl
 
     void CalibrationWizard::begin()
     {
+        proc.work.calOpen = true;
         showPage (Page::Tuning);
+    }
+
+    void CalibrationWizard::resume()
+    {
+        page = (Page) juce::jlimit (0, 2, proc.work.calPage);
+        if (page != Page::Tuning)
+        {
+            startTracker();
+            session.stop(); // the sound was not heard while the window was closed
+        }
+        showPage (page);
+    }
+
+    void CalibrationWizard::startTracker()
+    {
+        // Calibrate from a clean state: default channel order, no gain or cents corrections.
+        auto backup = proc.calibration;
+        proc.calibration = Calibration {};
+        proc.calibrating = true;
+        proc.rebuildTracker();
+        proc.calibration = backup; // restored now; the tracker already runs with the clean copy
     }
 
     void CalibrationWizard::showPage (Page p)
     {
         page = p;
+        proc.work.calPage = (int) p;
         const bool tuningPage = p == Page::Tuning, running = p == Page::Running, done = p == Page::Done;
 
         startButton.setVisible (tuningPage);
         fullButton.setVisible (tuningPage);
         endFretsButton.setVisible (false); // shown by tick() during "every note"
         cancelButton.setVisible (! done);
-        retryButton.setVisible (running);
-        acceptButton.setVisible (running);
+        listenButton.setVisible (running);
+        backButton.setVisible (running || done);
+        acceptButton.setVisible (false);   // shown by tick() when there is a decision to make
         skipButton.setVisible (running);
         saveButton.setVisible (done);
         discardButton.setVisible (done);
@@ -233,6 +287,7 @@ namespace gl
         tick();
         resized();
         repaint();
+        if (running && isShowing()) grabKeyboardFocus(); // for the Space bar
     }
 
     void CalibrationWizard::startListening (bool full)
@@ -240,13 +295,7 @@ namespace gl
         if (trackMode (proc) == TrackMode::Off)
             return;
 
-        // Calibrate from a clean state: default channel order, no gain or cents corrections.
-        auto backup = proc.calibration;
-        proc.calibration = Calibration {};
-        proc.calibrating = true;
-        proc.rebuildTracker();
-        proc.calibration = backup; // restored now; the tracker already runs with the clean copy
-
+        startTracker();
         session.start (proc.instrument, hexMode (proc), std::max (1, proc.numGuitarInputs()), full);
         shownProgress = 0.0;
         showPage (Page::Running);
@@ -268,6 +317,8 @@ namespace gl
         proc.calibrating = false;
         proc.rebuildTracker();
         page = Page::Tuning;
+        proc.work.calPage = 0;
+        proc.work.calOpen = false;
         if (onClose) onClose();
     }
 
@@ -341,7 +392,9 @@ namespace gl
                         "lowest and highest string, then pick softly 4 times and hard 4 times.\n\n"
                         "FULL (15-20 min, best results): stay quiet, then play EVERY fret on EVERY string, one after another"
                      << (mode == TrackMode::Hex ? "" : ", then strum about 37 chords 3 times each (open, 7th, sus, barre and power chords)")
-                     << ", then soft and hard picking on every string. The fretboard shows what to play next.";
+                     << ", then soft and hard picking on every string. The fretboard shows what to play next.\n\n"
+                        "For EVERY step: press Listen (or the Space bar), play what is shown, and wait for OK. "
+                        "Then the next step appears. Played something wrong? Press Back and play it again.";
 
                 body.setText (text, juce::dontSendNotification);
                 startButton.setEnabled (mode != TrackMode::Off && inputs > 0);
@@ -350,17 +403,29 @@ namespace gl
             }
 
             case Page::Running:
-                title.setText ("Calibration - listening", juce::dontSendNotification);
-                stepLabel.setText ("Step " + juce::String (session.stepNumber()) + " of " + juce::String (session.totalSteps()),
+            {
+                using Phase = CalibrationSession::Phase;
+                const auto phase = session.phase();
+                title.setText ("Calibration", juce::dontSendNotification);
+                stepLabel.setText ("Step " + juce::String (session.stepNumber()) + " of " + juce::String (session.totalSteps())
+                                   + (phase == Phase::Listening ? juce::String ("   -   listening: play now")
+                                                                : juce::String ("   -   press Listen (or Space), then play")),
                                    juce::dontSendNotification);
                 instruction.setText (juce::String (session.instruction()), juce::dontSendNotification);
                 status.setText (juce::String (session.status()), juce::dontSendNotification);
-                status.setColour (juce::Label::textColourId, session.waitingForUser() ? theme::bad : theme::textDim);
-                acceptButton.setEnabled (session.waitingForUser());
-                if (endFretsButton.isVisible() != session.canEndFrets())
+                status.setColour (juce::Label::textColourId, phase == Phase::Listening ? theme::accent
+                                                           : (session.statusIsGood() ? theme::good : theme::bad));
+                listenButton.setButtonText (phase == Phase::Listening ? "Stop listening" : (phase == Phase::Decide ? "Again" : "Listen"));
+                backButton.setEnabled (session.canGoBack());
+                const bool buttonsChanged = endFretsButton.isVisible() != session.canEndFrets()
+                                         || acceptButton.isVisible() != (phase == Phase::Decide);
+                endFretsButton.setVisible (session.canEndFrets());
+                acceptButton.setVisible (phase == Phase::Decide);
+                if (buttonsChanged) resized();
+                if (session.finished())
                 {
-                    endFretsButton.setVisible (session.canEndFrets());
-                    resized();
+                    showPage (Page::Done);
+                    break;
                 }
                 if (std::abs (shownProgress - session.stepProgress()) > 0.005)
                 {
@@ -368,6 +433,7 @@ namespace gl
                     repaint();
                 }
                 break;
+            }
 
             case Page::Done:
                 title.setText ("Calibration - done", juce::dontSendNotification);
@@ -398,11 +464,12 @@ namespace gl
         title.setBounds (r.removeFromTop (30));
 
         auto buttons = r.removeFromBottom (30);
-        for (auto* b : { &startButton, &fullButton, &retryButton, &acceptButton, &skipButton, &endFretsButton,
+        for (auto* b : { &startButton, &fullButton, &listenButton, &acceptButton, &backButton, &skipButton, &endFretsButton,
                          &saveButton, &discardButton, &cancelButton })
             if (b->isVisible())
             {
-                b->setBounds (buttons.removeFromLeft (b == &startButton || b == &fullButton || b == &endFretsButton ? 210 : 120));
+                b->setBounds (buttons.removeFromLeft (b == &startButton || b == &fullButton || b == &endFretsButton ? 210
+                                                      : (b == &listenButton ? 160 : 120)));
                 buttons.removeFromLeft (8);
             }
 
@@ -536,16 +603,17 @@ namespace gl
             "and load it again later instead of calibrating again.\n"
             "Loading replaces the calibration in use, and also sets Strings and Tuning in the top bar to the tuning "
             "the calibration was made for.\n"
+            "'Default (no calibration)' goes back to the plain settings, as if you never calibrated.\n"
             "Presets are shared by all your projects and by the standalone app. They are saved as small text files in:\n"
             + presetFolder().getFullPathName());
         presetLabel.setTooltip (presetTip);
         presetBox.setTooltip (presetTip);
         presetBox.setTextWhenNothingSelected ("Choose a saved calibration...");
-        presetBox.setTextWhenNoChoicesAvailable ("No saved calibrations yet");
         presetBox.onChange = [this]
         {
-            const int i = presetBox.getSelectedItemIndex();
-            if (i >= 0 && i < presetFiles.size()) loadPreset (presetFiles[i]);
+            const int id = presetBox.getSelectedId();
+            if (id == kDefaultPresetId) loadDefaultCalibration();
+            else if (id - 2 >= 0 && id - 2 < presetFiles.size()) loadPreset (presetFiles[id - 2]);
         };
         addAndMakeVisible (presetLabel);
         addAndMakeVisible (presetBox);
@@ -589,12 +657,18 @@ namespace gl
 
         wizard.onClose = [this] { wizard.setVisible (false); updateStatus(); };
         addChildComponent (wizard);
+        if (proc.work.calOpen)
+        {
+            wizard.setVisible (true);
+            wizard.resume();
+        }
 
         refresh();
     }
 
     TrackerPanel::~TrackerPanel()
     {
+        // The window closes: normal tracking goes on. The wizard keeps its place (proc.work) and waits for Listen.
         if (proc.calibrating.load())
         {
             proc.calibrating = false;
@@ -620,8 +694,10 @@ namespace gl
         presetFiles = presetFolder().findChildFiles (juce::File::findFiles, false, "*.glcal");
         presetFiles.sort();
         presetBox.clear (juce::dontSendNotification);
+        presetBox.addItem ("Default (no calibration)", kDefaultPresetId);
+        if (! presetFiles.isEmpty()) presetBox.addSeparator();
         for (int i = 0; i < presetFiles.size(); ++i)
-            presetBox.addItem (presetFiles[i].getFileNameWithoutExtension(), i + 1);
+            presetBox.addItem (presetFiles[i].getFileNameWithoutExtension(), i + 2);
         deleteArmedAt = 0;
         deletePresetButton.setButtonText ("Delete");
     }
@@ -645,6 +721,14 @@ namespace gl
         showPresetMessage ("Loaded: " + file.getFileNameWithoutExtension());
     }
 
+    void TrackerPanel::loadDefaultCalibration()
+    {
+        proc.calibration = Calibration {};
+        proc.rebuildTracker();
+        presetName.clear();
+        showPresetMessage ("Back to the default: no calibration in use.");
+    }
+
     void TrackerPanel::savePreset()
     {
         const auto name = juce::File::createLegalFileName (presetName.getText().trim());
@@ -666,13 +750,13 @@ namespace gl
             return;
         }
         refreshPresets();
-        presetBox.setSelectedItemIndex (presetFiles.indexOf (file), juce::dontSendNotification);
+        presetBox.setSelectedId (presetFiles.indexOf (file) + 2, juce::dontSendNotification);
         showPresetMessage ("Saved: " + name);
     }
 
     void TrackerPanel::deletePreset()
     {
-        const int i = presetBox.getSelectedItemIndex();
+        const int i = presetBox.getSelectedId() - 2;
         if (i < 0 || i >= presetFiles.size()) return;
 
         // First click arms the button, a second click within 3 seconds deletes.

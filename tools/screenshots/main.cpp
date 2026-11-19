@@ -434,7 +434,11 @@ int main (int argc, char** argv)
 
     // ---------------------------------------------------------------- 8. Full calibration: every note
     click (button (root, "Full calibration (15-20 min)"), "Full calibration");
+    click (button (root, "Listen"), "Listen (silence)");          // every step starts with Listen
     feed (*proc, silence (3.4));                                   // silence step
+    pump (200);                                                    // the button says "Listen" again
+    click (button (root, "Listen"), "Listen (open low E)");
+    feed (*proc, silence (0.05));
     feed (*proc, pluck (0.7, [] (double) { return 82.41 * std::pow (2.0, -8.0 / 1200.0); })); // open low E, 8 cents flat
     feed (*proc, silence (0.15));
     writePng (snap (*root), "09-full-calibration-every-note.png");

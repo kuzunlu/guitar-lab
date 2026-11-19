@@ -8,6 +8,7 @@
 #include "UI/ReharmPanel.h"
 #include "UI/ShapesPanel.h"
 #include "UI/Theme.h"
+#include "UI/Tooltip.h"
 #include "UI/TrackerPanel.h"
 #include "UI/TrainerPanel.h"
 
@@ -40,10 +41,12 @@ private:
     void reloadAll();              // after a project/preset was loaded
     void updateChordName (const std::set<gl::MidiNote>& sounding);
     int  currentTab() const { return tabs.getCurrentTabIndex(); }
+    void layoutPage();             // sizes the page; it scrolls when the open tab needs more height than the window
+    int  panelHeight (int width);  // height the open tab's panel needs
 
     GuitarLabProcessor& proc;
     gl::theme::LookAndFeel lnf;
-    juce::TooltipWindow tooltipWindow { this, 450 };
+    gl::DelayedTooltipWindow tooltipWindow { this }; // waits 1 s on every control
 
     gl::InstrumentBar      instrumentBar;
     gl::FretboardComponent fretboard;
@@ -55,6 +58,8 @@ private:
     gl::TrackerPanel       trackerPanel;
     Tabs tabs;
     juce::Label chordName;                // chord analyser, at the right of the tab row
+    juce::Component content;              // everything above; the page scrolls it up and down
+    juce::Viewport page;
     std::set<gl::MidiNote> lastChordNotes;
 
     std::vector<int> lastTuning;

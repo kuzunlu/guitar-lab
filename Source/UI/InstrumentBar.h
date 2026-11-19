@@ -2,6 +2,7 @@
 
 #include "PluginProcessor.h"
 #include "UI/Theme.h"
+#include "UI/UiMemory.h"
 
 #include <map>
 
@@ -19,6 +20,7 @@ namespace gl
 
         // Re-reads everything from the processor (after a project is loaded).
         void refresh();
+        void restoreUi();  // after a project was loaded: scale and name choices come back
 
         // Switches to this tuning (and string count), as if the player chose it here. Used by calibration presets.
         void applyTuning (const std::vector<MidiNote>& openNotes);
@@ -57,6 +59,7 @@ namespace gl
         juce::Label versionLabel;
 
         bool updating = false;
+        UiMemory memory { proc.uiState, "TopBar" }; // last member: see UiMemory
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (InstrumentBar)
     };

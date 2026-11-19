@@ -74,7 +74,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout GuitarLabProcessor::createLa
 
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::trackMode, 1 },     "Guitar tracking",
                     StringArray { "Off", "Normal guitar: single notes (mono)", "Hex pickup (one input per string)",
-                                  "Normal guitar: chords too (poly)" }, 0)); // new modes go at the end: saved projects keep the number
+                                  "Normal guitar: chords too (poly)" }, 1)); // default Mono. New modes go at the end: saved projects keep the number
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::trackInput, 1 },    "Tracking input",
                     StringArray { "Mix of all inputs", "Input 1", "Input 2" }, 1));
     layout.add (std::make_unique<AudioParameterInt>    (ParameterID { ParamIDs::trackStability, 1 }, "Tracking safety", 1, 8, 3));
@@ -252,6 +252,12 @@ void GuitarLabProcessor::liveNoteOff (int string)
     const int ch = midiSettings.channelForString (string);
     liveRaw (juce::MidiMessage::noteOff (ch, liveNotes[(size_t) string]));
     liveNotes[(size_t) string] = -1;
+}
+
+void GuitarLabProcessor::allLiveNotesOff()
+{
+    for (int s = 0; s < gl::kMaxStrings; ++s)
+        liveNoteOff (s);
 }
 
 void GuitarLabProcessor::liveBend (int string, double semitones)
@@ -602,6 +608,7 @@ void GuitarLabProcessor::getStateInformation (juce::MemoryBlock& destData)
     extra.setProperty ("keyswitchChannel", midiSettings.keyswitchChannel, nullptr);
     extra.setProperty ("palmMuteCC", midiSettings.palmMuteCC, nullptr);
     extra.setProperty ("calibration", juce::String (calibration.serialise()), nullptr);
+    extra.appendChild (uiState.createCopy(), nullptr);
 
     state.removeChild (state.getChildWithName ("GuitarLabData"), nullptr);
     state.appendChild (extra, nullptr);
@@ -644,6 +651,10 @@ void GuitarLabProcessor::setStateInformation (const void* data, int sizeInBytes)
         midiSettings.keyswitchChannel = extra.getProperty ("keyswitchChannel", 0);
         midiSettings.palmMuteCC       = extra.getProperty ("palmMuteCC", -1);
         calibration.deserialise (extra.getProperty ("calibration").toString().toStdString());
+
+        // Copied into the same tree object: the panels look their part up again when the state is loaded.
+        const auto ui = extra.getChildWithName ("UiState");
+        uiState.copyPropertiesAndChildrenFrom (ui.isValid() ? ui : juce::ValueTree ("UiState"), nullptr);
     }
 
     phraseChanged();

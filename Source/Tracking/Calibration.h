@@ -104,34 +104,50 @@ namespace gl
         Chroma chroma {};
     };
 
-    // Walks the player through calibration. Feed it analysis frames; it moves through the steps.
+    // Walks the player through calibration, one thing to play at a time (an "item": silence, one string, one fret,
+    // one chord, soft or hard picking):
+    //   Ready      - waiting. The player presses Listen (listen()) and then plays.
+    //   Listening  - collects the sound. Only a NEW pick attack counts (or sound after a quiet moment), so a note that
+    //                still rings from the item before is never taken for the answer. Nothing clear for 10 s: Ready again.
+    //   OK         - the result is stored and the next item is Ready at once (status() says what was heard).
+    //   Decide     - it sounded wrong (out of tune, not the chord): Again (listen()), Use it anyway (accept()) or skip().
+    // back() goes to the item before and forgets its result (everything measured is put back as it was before it).
     class CalibrationSession
     {
     public:
         enum class Step { Silence, OpenString, TwelfthFret, EveryNote, Chord, Soft, Hard, Done };
+        enum class Phase { Ready, Listening, Decide, Done };
 
         // The instrument (tuning) must be chosen BEFORE starting.
         // full = also play every note on every string, and (mono mode) a set of chords.
         void start (const Instrument& inst, bool hexMode, int numInputChannels, bool full = false);
 
+        // Analysis frames. They only count while Listening.
         void feed (const AnalysisFrame& f, double hopSeconds);
 
         // Buttons in the wizard.
-        void accept();   // keep the last measurement even though it looked wrong (e.g. string out of tune)
-        void retry();    // measure this step again
-        void skip();     // skip this step (keeps default values). In "every note": skips one fret.
+        void listen();   // Ready or Decide: listen to what is played next (in Decide: "Again")
+        void stop();     // Listening: stop listening, back to Ready (nothing is stored)
+        void back();     // go to the item before; its result is forgotten
+        void accept();   // Decide: keep the last measurement even though it looked wrong (e.g. string tuned like this on purpose)
+        void retry() { listen(); }
+        void skip();     // skip this item (keeps default values)
         void noMoreFrets(); // "every note": this guitar has no more frets (applies to all strings)
         bool canEndFrets() const { return current == Step::EveryNote; }
+        bool canGoBack() const     { return stepIndex > 0; }
 
+        Phase phase() const;
         Step step() const          { return current; }
         bool finished() const      { return current == Step::Done; }
         bool waitingForUser() const{ return needDecision; }
+        bool isListening() const   { return listening; }
         int  stepNumber() const    { return stepIndex + 1; }
         int  totalSteps() const    { return (int) plan.size(); }
         double stepProgress() const{ return progress; }
 
         std::string instruction() const;  // what the player should do now
         std::string status() const        { return statusText; } // what was heard / problems
+        bool statusIsGood() const         { return statusGood; }
 
         const Calibration& result() const { return cal; }
 
@@ -145,10 +161,23 @@ namespace gl
         static std::vector<ChordTemplate> chordShapesFor (const Instrument& inst);
 
     private:
-        struct PlanItem { Step step; int string; };
+        struct PlanItem { Step step; int string; int fret = 0; }; // Chord: string = chord index
+
+        // Everything measured so far, taken before each item (back() puts it back).
+        struct Snapshot
+        {
+            Calibration cal;
+            std::vector<PlanItem> plan;
+            std::vector<float> spotLevels, softLevels, hardLevels;
+            std::array<double, kMaxStrings> bleedSum {};
+            std::array<int, kMaxStrings> bleedCount {};
+        };
 
         void beginStep();
         void finishStep();
+        void clearMeasurement();
+        bool newAttack (const AnalysisFrame& f);
+        void say (const std::string& text, bool good) { statusText = text; statusGood = good; }
         void evaluatePitch();
         void evaluateEveryNote();
         void feedChord (const AnalysisFrame& f, double hop);
@@ -158,11 +187,18 @@ namespace gl
         Instrument inst;
         Calibration cal;
         std::vector<PlanItem> plan;
+        std::vector<Snapshot> history;   // history[i] = state before plan item i
         int stepIndex = 0;
         Step current = Step::Silence;
         int inputs = 1;
 
-        // Per-step data
+        // Per-item data
+        bool   listening = false;
+        double listenTime = 0.0;
+        bool   armed = false;                  // a new pick attack was heard since Listen
+        std::array<bool, kMaxStrings> quietSeen {};
+        std::array<bool, kMaxStrings> heardBefore {};
+        std::array<float, kMaxStrings> attackEnvelope {};
         double elapsed = 0.0;
         double progress = 0.0;
         bool   needDecision = false;
@@ -174,6 +210,7 @@ namespace gl
         std::array<float, kMaxStrings> channelEnergy {};
         double pendingCents = 0.0;
         std::string statusText;
+        bool statusGood = true;
 
         // Full calibration
         bool full = false;

@@ -2,8 +2,11 @@
 
 #include "Audio/PluckSynth.h"
 #include "Midi/MidiRenderer.h"
+#include "Midi/Phrase.h"
 #include "Theory/Instrument.h"
+#include "Theory/Reharm.h"
 #include "Theory/Trainer.h"
+#include "Theory/Voicing.h"
 #include "Tracking/GuitarTracker.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -14,6 +17,7 @@
 #include <bitset>
 #include <functional>
 #include <memory>
+#include <optional>
 
 namespace ParamIDs
 {
@@ -81,6 +85,47 @@ public:
 
     // Text fields that are saved with the project.
     juce::String reharmInput { "I V vi IV" };
+
+    // Everything the window shows that is not a parameter (open tab, window size, the choices in every panel).
+    // The window is deleted when a DAW hides it; the panels keep their state here (UI/UiMemory.h). Message thread only.
+    juce::ValueTree uiState { "UiState" };
+
+    // Work in progress in the panels (reharm result, trainer question, undo history...). Kept here so it is still
+    // there when the window opens again; not saved in the project. The panels use these through references.
+    struct PanelWork
+    {
+        // Reharm Lab
+        juce::String reharmFor;                  // input, key and tuning the result below belongs to
+        std::vector<gl::TimedChord> reharmResult;
+        std::vector<gl::Voicing> reharmVoicings;
+        std::vector<int> reharmVoicingChoice;
+        gl::Voicing reharmShown;
+        bool reharmSelectedInResult = true;
+        int  reharmSelected = -1;
+        unsigned reharmSeed = 1;
+
+        // Trainer
+        std::optional<gl::Question> question;
+        std::vector<gl::FretPos> clicked, missed, wrong;
+        bool answered = false;
+        juce::String trainerFeedback;
+        bool trainerFeedbackGood = true;
+
+        // Calibration wizard (paused while the window is closed: it waits for Listen again)
+        gl::CalibrationSession calSession;
+        int  calPage = 0;                        // CalibrationWizard::Page
+        bool calOpen = false;
+
+        // Play & Write
+        std::vector<std::string> phraseUndo;
+        std::vector<gl::NoteEvent> clipboard;
+        double phraseCursor = 0.0;
+        int phraseSelected = -1;
+        std::vector<int> phraseSelection;
+        float phraseZoom = 1.0f;
+        bool phraseAutoFit = true;
+        int phraseViewX = 0;
+    } work;
     int  reharmKeyTonic = 0;
     bool reharmKeyMinor = false;
 
@@ -91,6 +136,7 @@ public:
     // Live notes from the fretboard / piano. Safe to call from the message thread.
     void liveNoteOn  (int string, int fret);
     void liveNoteOff (int string);
+    void allLiveNotesOff();              // stops every string (before a new chord is played)
     void liveBend    (int string, double semitones);
     void liveRaw     (const juce::MidiMessage& m);
 

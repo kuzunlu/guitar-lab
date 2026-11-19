@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <set>
 
 namespace gl
@@ -101,7 +102,19 @@ namespace gl
     std::string chordsForReharm (const std::vector<ChordSpan>& spans)
     {
         // The Reharm Lab reads common symbols (triads, 7ths, sus, dim...): turn each chord into the nearest of those.
-        std::string out;
+        std::string out, last;
+        double beats = 0.0;
+        auto flush = [&]
+        {
+            if (last.empty()) return;
+            out += (out.empty() ? "" : " ") + last;
+            if (std::abs (beats - 4.0) > 1.0e-6)
+            {
+                char number[32];
+                std::snprintf (number, sizeof (number), "%g", std::round (beats * 100.0) / 100.0);
+                out += ":" + std::string (number);
+            }
+        };
         for (const auto& s : spans)
         {
             const auto parsed = parseChordName (s.name);
@@ -119,9 +132,12 @@ namespace gl
             else if (has (2)) q = "sus2";
             else              q = "";                              // power chord: play it as major
             const std::string name = root + q;
-            if (! out.empty() && out.substr (out.rfind (' ') + 1) == name) continue; // the same chord again
-            out += (out.empty() ? "" : " ") + name;
+            if (name == last) { beats += s.end - s.start; continue; } // the same chord again: one longer chord
+            flush();
+            last = name;
+            beats = s.end - s.start;
         }
+        flush();
         return out;
     }
 }

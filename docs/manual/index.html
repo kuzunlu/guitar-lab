@@ -163,7 +163,7 @@ footer { padding-block: 40px 60px; color: var(--muted); font-size: 0.9rem; }
 </head>
 <body>
 <header class="wrap top">
-  <div class="eyebrow">Guitar Lab v0.3 · user manual</div>
+  <div class="eyebrow">Guitar Lab v0.4 · user manual</div>
   <h1>Guitar Lab Manual</h1>
   <p class="lead">Every button, menu and setting, explained. Each one has a tag that says how often you need to touch it. Most of them you never touch.</p>
   <div class="legend" aria-label="What the tags mean">
@@ -255,7 +255,7 @@ footer { padding-block: 40px 60px; color: var(--muted); font-size: 0.9rem; }
 <section id="map">
   <div class="head">
     <h2>The window</h2>
-    <p>Five parts, from top to bottom. The fretboard and piano are always visible; the middle part changes with the tab you pick.</p>
+    <p>Five parts, from top to bottom. The tab area changes with the tab you pick. When a tab needs more room (a long list of chord shapes or suggestions), the <b>whole page</b> scrolls up and down with one scroll bar.</p>
   </div>
   <figure class="shot">
     <div class="map">
@@ -275,6 +275,9 @@ footer { padding-block: 40px 60px; color: var(--muted); font-size: 0.9rem; }
     <li><b>Tab area</b>: the controls of the tab you picked.</li>
     <li><b>Piano</b>: the same notes on a keyboard. <a href="#neck">Details</a></li>
   </ol>
+  <p class="note"><b>Help on every control:</b> hold the mouse still on a button, box or slider for about a second, and a help text appears. It closes when you move away.<br>
+  <b>Nothing is forgotten:</b> the window size, the open tab and every choice in every tab come back after you switch tabs, close or minimise the window, and they are saved with your project. Work in progress (a reharmonized progression, the open Trainer question, the undo history, a calibration you started) also comes back while the plugin stays loaded.<br>
+  <b>Sliders</b> show a small mark at each end of their track: the lowest and the highest value.</p>
 </section>
 
 <!-- ============================================================ TOP BAR -->
@@ -296,7 +299,7 @@ footer { padding-block: 40px 60px; color: var(--muted); font-size: 0.9rem; }
     <div class="row"><div class="ctl"><span class="chip">Show scale</span></div><div class="what"><p>Root and scale type: shows that scale on the whole neck and the piano. Orange = root, grey = other notes. "Off" hides it. Only a display.</p></div><span class="tag opt t">Optional</span></div>
     <div class="row"><div class="ctl"><span class="chip">All note names</span></div><div class="what"><p>Every note name on every fret, faintly. Good for learning the neck.</p></div><span class="tag opt t">Optional</span></div>
     <div class="row"><div class="ctl"><span class="chip">Flats</span></div><div class="what"><p>Bb, Eb… instead of A#, D#… Same notes, other names.</p></div><span class="tag opt t">Optional</span></div>
-    <div class="row"><div class="ctl"><span class="chip">v0.3.1</span></div><div class="what"><p>The version you have installed.</p></div><span class="tag leave t">Leave alone</span></div>
+    <div class="row"><div class="ctl"><span class="chip">v0.4.0</span></div><div class="what"><p>The version you have installed.</p></div><span class="tag leave t">Leave alone</span></div>
     <div class="row"><div class="ctl"><span class="chip">Manual</span></div><div class="what"><p>Opens this manual in your web browser.</p></div><span class="tag opt t">Optional</span></div>
     <div class="row"><div class="ctl"><span class="chip">MIDI / Sound...</span></div><div class="what"><p>MIDI and sound settings. Most can stay as they are. <a href="#midisound">See the list</a></p></div><span class="tag once t">Set once</span></div>
   </div>
@@ -313,7 +316,7 @@ footer { padding-block: 40px 60px; color: var(--muted); font-size: 0.9rem; }
     <h3>Settings</h3>
     <div class="row"><div class="ctl"><span class="chip">Tracking</span></div><div class="what">
       <p><b>Off</b>: Guitar Lab does not listen.</p>
-      <p><b>Normal guitar: single notes (mono)</b>: one note at a time. The fastest and most exact mode for lead playing: bends, slides, vibrato, hammer-ons.</p>
+      <p><b>Normal guitar: single notes (mono)</b> (the default): one note at a time. The fastest and most exact mode for lead playing: bends, slides, vibrato, hammer-ons.</p>
       <p><b>Normal guitar: chords too (poly)</b>: several notes at once from one cable: chords, double stops, ringing arpeggios, with bends per note. About 50–65 ms delay. It can miss an octave note hidden inside another string's sound; known chord shapes fill those in. A Full calibration makes it much better.</p>
       <p><b>Hex pickup</b>: a special pickup with one output per string (like a Roland GK). Every string tracked on its own.</p></div><span class="tag once t">Set once</span></div>
     <div class="row"><div class="ctl"><span class="chip">Input</span></div><div class="what"><p>Which input your guitar is on. In a DAW this is the left (Input 1) or right (Input 2) channel of the track. "Mix of all inputs" adds them.</p></div><span class="tag once t">Set once</span></div>
@@ -327,7 +330,7 @@ footer { padding-block: 40px 60px; color: var(--muted); font-size: 0.9rem; }
   </div>
   <div class="controls">
     <h3>Saved calibrations (presets)</h3>
-    <div class="row"><div class="ctl"><span class="chip">Saved calibrations ▼</span></div><div class="what"><p>Pick one to load it. It also sets <b>Strings</b> and <b>Tuning</b> to the ones it was made for. Calibrate each guitar (and tuning) once, save it, and load it again later.</p><p class="sub">Shared by all your projects and the standalone app. Stored as small files in <code>%APPDATA%\Guitar Lab\Calibrations</code>.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Saved calibrations ▼</span></div><div class="what"><p>Pick one to load it. It also sets <b>Strings</b> and <b>Tuning</b> to the ones it was made for. Calibrate each guitar (and tuning) once, save it, and load it again later.</p><p><b>Default (no calibration)</b>, at the top of the list, goes back to the plain settings, as if you never calibrated.</p><p class="sub">Shared by all your projects and the standalone app. Stored as small files in <code>%APPDATA%\Guitar Lab\Calibrations</code>.</p></div><span class="tag often t">Use often</span></div>
     <div class="row"><div class="ctl"><span class="chip">Name box</span><span class="chip">Save as preset</span></div><div class="what"><p>Type a name (for example "Strat Drop D") and save the calibration you are using now. The same name replaces the old one.</p></div><span class="tag once t">Set once</span></div>
     <div class="row"><div class="ctl"><span class="chip">Delete</span></div><div class="what"><p>Deletes the chosen preset file. Click twice ("Sure?") to be safe.</p></div><span class="tag opt t">Optional</span></div>
   </div>
@@ -345,10 +348,11 @@ footer { padding-block: 40px 60px; color: var(--muted); font-size: 0.9rem; }
   <div class="head">
     <h2>Calibration</h2>
     <p>Guitar Lab listens to your guitar once and remembers how it really sounds. Tracking is much better afterwards. It is saved with your project, and you can save it as a preset.</p>
+    <p><b>One step at a time:</b> press <span class="chip">Listen</span> (or the Space bar), play what is shown, and wait for the green <b>OK</b>. Then the next step appears; press Listen again. Guitar Lab only listens after your press, and only to a <b>new</b> note: a string that still rings from the step before is ignored. Played something wrong? Press <span class="chip">Back</span> and play it again.</p>
   </div>
   <div class="two">
     <figure class="shot"><img src="img/m-cal-start.jpg" width="1280" height="435" alt="Calibration step 1"><figcaption>Step 1: check the tuning, then choose Quick or Full.</figcaption></figure>
-    <figure class="shot"><img src="img/09-full-calibration-every-note.jpg" width="1320" height="860" alt="Full calibration asking for a fret"><figcaption>Full calibration: the yellow dot shows what to play next.</figcaption></figure>
+    <figure class="shot"><img src="img/09-full-calibration-every-note.jpg" width="1320" height="860" alt="Full calibration asking for a fret"><figcaption>Full calibration: "OK" for the open low E, and the next step (fret 1, yellow dot) waits for Listen.</figcaption></figure>
   </div>
   <div class="controls">
     <h3>Step 1 · your tuning</h3>
@@ -356,14 +360,16 @@ footer { padding-block: 40px 60px; color: var(--muted); font-size: 0.9rem; }
     <div class="row"><div class="ctl"><span class="chip">Full calibration (15-20 min)</span></div><div class="what"><p>Quiet → <b>every fret on every string</b> → about <b>37 chords</b>, 3 strums each (open, 7th, maj7, sus, barre and power chords, in the fingerings most people use) → soft and hard picking on <b>every string</b>.</p><p class="sub">Best results: the string is guessed from its sound, poly mode learns your guitar's tone, taught chords are recognised, velocity fits each string, and you get the intonation report.</p></div><span class="tag once t">Set once</span></div>
   </div>
   <div class="controls">
-    <h3>While it listens</h3>
-    <div class="row"><div class="ctl"><span class="chip">Retry</span></div><div class="what"><p>Listen to this step again (you played the wrong note).</p></div><span class="tag opt t">Optional</span></div>
-    <div class="row"><div class="ctl"><span class="chip">Accept</span></div><div class="what"><p>Keep it even though it looked wrong. Only active when Guitar Lab is unsure.</p></div><span class="tag opt t">Optional</span></div>
+    <h3>Every step</h3>
+    <div class="row"><div class="ctl"><span class="chip">Listen</span></div><div class="what"><p>Press it (or the Space bar, or Enter), then play what is shown. While it listens the button says <b>Stop listening</b>; after a problem it says <b>Again</b>. Nothing clear for 10 seconds: it stops and waits for you.</p><p class="sub">In a DAW the Space bar may start the DAW instead: then click the button.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Back</span></div><div class="what"><p>One step back. The result of that step is forgotten; play it again. Press it more times to go further back (also from the last page).</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Use it anyway</span></div><div class="what"><p>Only shown when it sounded wrong (out of tune, not the chord). Keeps it as it is, for example a string tuned like that on purpose.</p></div><span class="tag opt t">Optional</span></div>
     <div class="row"><div class="ctl"><span class="chip">Skip</span></div><div class="what"><p>Skip this step; safe defaults are used.</p></div><span class="tag opt t">Optional</span></div>
     <div class="row"><div class="ctl"><span class="chip">My guitar ends here</span></div><div class="what"><p>The fret asked for does not exist on your guitar (fret 23 on a 22-fret guitar).</p></div><span class="tag opt t">Optional</span></div>
     <div class="row"><div class="ctl"><span class="chip">Save calibration</span><span class="chip">Discard</span></div><div class="what"><p>At the end: use the new results, or keep the old ones.</p></div><span class="tag once t">Set once</span></div>
   </div>
-  <p class="note">Calibrate again after new strings, another tuning, another pickup or another audio interface.</p>
+  <p class="note">Calibrate again after new strings, another tuning, another pickup or another audio interface.<br>
+  Closing the plugin window during calibration only pauses it: normal tracking goes on, and the wizard opens again at the same step.</p>
 </section>
 
 <!-- ============================================================ INTONATION -->
@@ -442,7 +448,7 @@ footer { padding-block: 40px 60px; color: var(--muted); font-size: 0.9rem; }
     <div class="row"><div class="ctl"><span class="chip">Text tab (.txt)</span></div><div class="what"><p>Classic <code>e|--3--5--|</code> tab with chord names, to paste into a message or forum. "Copy text tab to the clipboard" skips the file.</p></div><span class="tag often t">Use often</span></div>
     <div class="row"><div class="ctl"><span class="chip">PDF</span></div><div class="what"><p>A printable tab page, like a tab book.</p></div><span class="tag often t">Use often</span></div>
     <div class="row"><div class="ctl"><span class="chip">MusicXML</span></div><div class="what"><p>Opens in MuseScore, Guitar Pro, Sibelius and Finale as tab and notes, with chord symbols.</p></div><span class="tag opt t">Optional</span></div>
-    <div class="row"><div class="ctl"><span class="chip">Guitar Pro 3 (.gp3)</span></div><div class="what"><p>Opens directly in Guitar Pro (3 to 8), TuxGuitar and Songsterr. Up to 7 strings; GP3 has no palm mute.</p><p class="sub">New in this version: if a file does not open in your program, use MusicXML and let us know.</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Guitar Pro 3 (.gp3)</span></div><div class="what"><p>Opens directly in Guitar Pro (3 to 8), TuxGuitar and Songsterr. Up to 7 strings; GP3 has no palm mute.</p><p class="sub">If a file does not open in your program, use MusicXML and let us know.</p></div><span class="tag opt t">Optional</span></div>
   </div>
 </section>
 
@@ -459,11 +465,12 @@ footer { padding-block: 40px 60px; color: var(--muted); font-size: 0.9rem; }
     <div class="row"><div class="ctl"><span class="chip">Root</span><span class="chip">Type</span></div><div class="what"><p>Or pick a root and one of 35 chord types; it writes the symbol for you.</p></div><span class="tag often t">Use often</span></div>
     <div class="row"><div class="ctl"><span class="chip">Hand stretch</span></div><div class="what"><p>The most frets one shape may cover (4 = normal hand).</p></div><span class="tag opt t">Optional</span></div>
     <div class="row"><div class="ctl"><span class="chip">Neck</span></div><div class="what"><p>Only shapes in this part of the neck (open position, frets 5–10, …).</p></div><span class="tag opt t">Optional</span></div>
-    <div class="row"><div class="ctl"><span class="chip">Strings</span></div><div class="what"><p>How many strings a shape must use (more = fuller strum, fewer = small jazz/funk shapes).</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Strings</span><span class="chip">to</span></div><div class="what"><p>How many strings a shape uses: from the left number to the right number, up to all strings of your guitar (7 and 8 too). More = fuller strum, fewer = small jazz/funk shapes. Example: 3 to 4 = only small shapes.</p></div><span class="tag opt t">Optional</span></div>
     <div class="row"><div class="ctl"><span class="chip">Root lowest</span><span class="chip">Open strings</span><span class="chip">Skip a string inside</span></div><div class="what"><p>Root (or the "/" note) as the lowest note; allow open strings; allow one muted string in the middle (jazz voicings).</p></div><span class="tag opt t">Optional</span></div>
   </div>
   <div class="calm">
-    <p><strong>The diagrams:</strong> the thickest string is on the left; the number on the left is the fret; x = don't play, o = open. Orange dot = root, blue = other chord notes. <b>Gold title</b> = a fingering most guitarists use (open chord, barre chord on the E / A shape, D shape, jazz shape), most played first.</p>
+    <p><strong>The diagrams:</strong> the thickest string is on the left; the number on the left is the fret; x = don't play, o = open. Orange dot = root, blue = other chord notes. <b>Gold title</b> = a fingering most guitarists use (open chord, barre chord on the E / A shape, D shape, jazz shape), most played first. Click a shape to hear it: a new chord always stops the one before, in the sound and on the neck.</p>
+    <p><strong>7 and 8 strings:</strong> the search uses every string of your guitar. The gold "usual fingerings" are six-string shapes, placed on each group of six strings; all other shapes come after them.</p>
   </div>
 </section>
 
@@ -487,8 +494,11 @@ footer { padding-block: 40px 60px; color: var(--muted); font-size: 0.9rem; }
   <figure class="shot"><img src="img/m-reharm.jpg" width="1320" height="478" alt="Reharm Lab"><figcaption>"I V vi IV" in C. Changed chords have a yellow border, with the reason under them.</figcaption></figure>
   <div class="controls">
     <h3>Your progression</h3>
-    <div class="row"><div class="ctl"><span class="chip">Progression</span></div><div class="what"><p>Chords with spaces between them: Roman numerals (<b>I V vi IV</b>) or names (<b>C G Am F</b>). One bar each.</p></div><span class="tag often t">Use often</span></div>
-    <div class="row"><div class="ctl"><span class="chip">Key</span><span class="chip">Major</span></div><div class="what"><p>The key of the song; numerals are read in this key.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Progression</span></div><div class="what"><p>Chords with spaces between them: Roman numerals (<b>I V vi IV</b>) or names (<b>C G Am F</b>). One bar (4 beats) each, unless you give a length:</p>
+      <p><code>C:2 G:2 Am F:8</code> = C and G 2 beats, Am 4, F 8. Any length works, like <code>G:1.5</code>.<br>
+      <code>| C G | Am | F |</code> = bar lines: the chords in one bar share it (C and G 2 beats each).</p>
+      <p class="sub">Or drag the line between two chord cards left or right (half-beat steps, Shift = quarter beats); the text changes with it.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Key</span><span class="chip">Major</span></div><div class="what"><p>The key of the song. Roman numerals are read in this key. Chord <b>names</b> (Em, G7) stay what you typed; the key then only decides the numeral shown under each card (Em in C = iii), the sharps or flats in the names, and the key-based ideas: borrowed chords, diatonic subs and the backdoor dominant. Tritone subs, secondary dominants, passing diminished chords and ii-V's come from the chords themselves. Wrong key = wrong numerals and odd "borrowed" ideas.</p></div><span class="tag often t">Use often</span></div>
     <div class="row"><div class="ctl"><span class="chip">Amount</span><span class="chip">Reharmonize</span><span class="chip">New idea</span><span class="chip">Reset</span></div><div class="what"><p>How many chords may change; build a new version; other random choices; back to yours.</p></div><span class="tag often t">Use often</span></div>
   </div>
   <div class="controls">
@@ -505,8 +515,8 @@ footer { padding-block: 40px 60px; color: var(--muted); font-size: 0.9rem; }
   <div class="controls">
     <h3>Shapes and results</h3>
     <div class="row"><div class="ctl"><span class="chip">Hand stretch</span><span class="chip">Neck area</span><span class="chip">Root in bass</span><span class="chip">Open strings</span></div><div class="what"><p>How the voicings are chosen, as in Chord Shapes.</p></div><span class="tag opt t">Optional</span></div>
-    <div class="row"><div class="ctl"><span class="chip">Chord cards</span><span class="chip">Next voicing</span></div><div class="what"><p>Click a card to hear it and see its shape; Next voicing shows another shape.</p></div><span class="tag often t">Use often</span></div>
-    <div class="row"><div class="ctl"><span class="chip">Suggestions</span><span class="chip">Apply suggestion</span></div><div class="what"><p>Every single change found, with a reason. Double-click one to use it.</p></div><span class="tag opt t">Optional</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Chord cards</span><span class="chip">Next voicing</span></div><div class="what"><p>Click a card to hear it, see its shape and list only <b>its</b> suggestions below (green border = selected). Next voicing shows another shape. The width of a card is its length; drag the line after a card to change it.</p></div><span class="tag often t">Use often</span></div>
+    <div class="row"><div class="ctl"><span class="chip">Suggestions</span><span class="chip">Apply suggestion</span><span class="chip">Show all</span></div><div class="what"><p>Every single change found, with a reason. Double-click one to use it. With a chord selected, only that chord's ideas are listed; <b>Show all</b> (or a click on empty space) lists them all again.</p></div><span class="tag opt t">Optional</span></div>
     <div class="row"><div class="ctl"><span class="chip">Send to phrase</span></div><div class="what"><p>Writes the progression into Play &amp; Write as strummed chords.</p><p class="warnline">It replaces the notes already in the phrase. Undo brings them back.</p></div><span class="tag opt t">Optional</span></div>
   </div>
 </section>
@@ -602,7 +612,7 @@ footer { padding-block: 40px 60px; color: var(--muted); font-size: 0.9rem; }
 </main>
 
 <footer class="wrap">
-  Guitar Lab v0.3 user manual. Every control in the plugin also has its own tooltip: hold the mouse over it.
+  Guitar Lab v0.4 user manual. Every control in the plugin also has its own tooltip: hold the mouse still on it for a second.
 </footer>
 
 <script>

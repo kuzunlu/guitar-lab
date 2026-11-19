@@ -16,9 +16,9 @@ GuitarLabEditor::GuitarLabEditor (GuitarLabProcessor& p)
     setLookAndFeel (&lnf);
     tooltipWindow.setLookAndFeel (&lnf);
 
-    addAndMakeVisible (instrumentBar);
-    addAndMakeVisible (fretboard);
-    addAndMakeVisible (piano);
+    content.addAndMakeVisible (instrumentBar);
+    content.addAndMakeVisible (fretboard);
+    content.addAndMakeVisible (piano);
 
     // Same order as the Tab enum. The first tab is the one that opens.
     tabs.addTab ("Guitar -> MIDI", theme::panel, &trackerPanel, false);
@@ -43,13 +43,27 @@ GuitarLabEditor::GuitarLabEditor (GuitarLabProcessor& p)
         "Trainer\nQuizzes on note names, finding notes, arpeggios and intervals. Focus on any strings and frets "
         "(like only the 4th string, or past the 12th fret). It learns your weak spots.");
     tabs.setTabBarDepth (28);
-    tabs.onChange = [this] { updateDisplay(); lastChordNotes.clear(); updateChordName ({}); };
-    addAndMakeVisible (tabs);
+    tabs.onChange = [this]
+    {
+        proc.uiState.setProperty ("tab", currentTab(), nullptr);
+        layoutPage();
+        page.setViewPosition (0, 0);
+        updateDisplay();
+        lastChordNotes.clear();
+        updateChordName ({});
+    };
+    content.addAndMakeVisible (tabs);
 
     chordName.setJustificationType (juce::Justification::centredRight);
     chordName.setFont (juce::FontOptions (17.0f, juce::Font::bold));
     chordName.setColour (juce::Label::textColourId, theme::accent);
-    addAndMakeVisible (chordName); // after the tabs, so it sits on top of the empty end of the tab row
+    content.addAndMakeVisible (chordName); // after the tabs, so it sits on top of the empty end of the tab row
+
+    // The whole page scrolls (one scroll bar for everything), instead of lists scrolling inside the panels.
+    page.setViewedComponent (&content, false);
+    page.setScrollBarsShown (true, false);
+    page.setSingleStepSizes (0, 48);
+    addAndMakeVisible (page);
 
     // --- Wiring ---
     instrumentBar.onChange = [this] { instrumentChanged(); };
@@ -105,6 +119,8 @@ GuitarLabEditor::GuitarLabEditor (GuitarLabProcessor& p)
     };
 
     reharmPanel.onDisplayChanged  = [this] { updateDisplay(); };
+    reharmPanel.onHeightChanged   = [this] { if (currentTab() == ReharmTab) layoutPage(); };
+    shapesPanel.onHeightChanged   = [this] { if (currentTab() == ShapesTab) layoutPage(); };
     reharmPanel.onPhraseReplaced  = [this] { phrasePanel.refresh(); tabs.setCurrentTabIndex (PlayTab); };
     trainerPanel.onDisplayChanged = [this] { updateDisplay(); };
     trackerPanel.onDisplayChanged = [this] { if (currentTab() == TrackerTab) updateDisplay(); };
@@ -118,9 +134,13 @@ GuitarLabEditor::GuitarLabEditor (GuitarLabProcessor& p)
 
     proc.onStateLoaded = [this] { reloadAll(); };
 
+    // The window comes back with the size and tab it had when it was closed. Read the size first:
+    // setResizeLimits() resizes the empty window, and resized() would store that size.
+    const int savedWidth = proc.uiState.getProperty ("width", 1320), savedHeight = proc.uiState.getProperty ("height", 860);
     setResizable (true, true);
-    setResizeLimits (1100, 720, 2400, 1500);
-    setSize (1320, 860);
+    setResizeLimits (1100, 560, 2400, 1500); // smaller windows scroll
+    setSize (juce::jlimit (1100, 2400, savedWidth), juce::jlimit (560, 1500, savedHeight));
+    tabs.setCurrentTabIndex (juce::jlimit (0, tabs.getNumTabs() - 1, (int) proc.uiState.getProperty ("tab", (int) TrackerTab)));
 
     instrumentChanged();
     startTimerHz (30);
@@ -135,6 +155,12 @@ GuitarLabEditor::~GuitarLabEditor()
 
 void GuitarLabEditor::reloadAll()
 {
+    instrumentBar.restoreUi();
+    shapesPanel.restoreUi();
+    reharmPanel.restoreUi();
+    trainerPanel.restoreUi();
+    phrasePanel.restoreUi();
+    tabs.setCurrentTabIndex (juce::jlimit (0, tabs.getNumTabs() - 1, (int) proc.uiState.getProperty ("tab", (int) TrackerTab)));
     instrumentBar.refresh();
     reharmPanel.refresh();
     shapesPanel.refresh();
@@ -312,12 +338,48 @@ void GuitarLabEditor::paint (juce::Graphics& g)
 
 void GuitarLabEditor::resized()
 {
-    auto r = getLocalBounds();
-    instrumentBar.setBounds (r.removeFromTop (64));
-    piano.setBounds (r.removeFromBottom (juce::jlimit (70, 120, getHeight() / 9)));
+    proc.uiState.setProperty ("width", getWidth(), nullptr);
+    proc.uiState.setProperty ("height", getHeight(), nullptr);
+    page.setBounds (getLocalBounds());
+    layoutPage();
+}
 
+int GuitarLabEditor::panelHeight (int width)
+{
+    // Lists grow to show everything; the other tabs need at least the height they were designed for.
+    switch (currentTab())
+    {
+        case ShapesTab:  return shapesPanel.heightFor (width);
+        case ReharmTab:  return reharmPanel.heightFor (width);
+        case TrackerTab: return 430;
+        case PlayTab:    return 400;
+        case TrainerTab: return 330;
+        default:         return 400;
+    }
+}
+
+void GuitarLabEditor::layoutPage()
+{
     const int strings = proc.instrument.numStrings();
     const int boardHeight = juce::jlimit (180, 340, 30 * strings + 40);
+    const int pianoHeight = juce::jlimit (70, 120, getHeight() / 9);
+    const int fixed = 64 + boardHeight + pianoHeight;
+
+    // The tab area fills the window, or is as tall as the open panel needs (then the page scrolls).
+    // With a scroll bar the page is a little narrower, which can change what the panel needs.
+    auto tabsHeight = [&] (int width) { return std::max (getHeight() - fixed, tabs.getTabBarDepth() + 4 + panelHeight (width - 4)); };
+    int width = getWidth();
+    int tabsH = tabsHeight (width);
+    if (fixed + tabsH > getHeight())
+    {
+        width -= page.getScrollBarThickness();
+        tabsH = tabsHeight (width);
+    }
+    content.setSize (width, fixed + tabsH);
+
+    auto r = content.getLocalBounds();
+    instrumentBar.setBounds (r.removeFromTop (64));
+    piano.setBounds (r.removeFromBottom (pianoHeight));
     fretboard.setBounds (r.removeFromTop (boardHeight));
     tabs.setBounds (r);
     chordName.setBounds (r.getX() + r.getWidth() - 420, r.getY(), 412, 28); // empty end of the tab row

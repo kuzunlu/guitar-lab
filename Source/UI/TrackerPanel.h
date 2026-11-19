@@ -28,12 +28,16 @@ namespace gl
         juce::String getTooltip() override;
     };
 
+    // One thing to play at a time: the player presses Listen (or Space), plays, sees OK, and the next thing appears.
+    // Back goes to the thing before. The session lives in the processor, so closing the window only pauses it.
     class CalibrationWizard : public juce::Component
     {
     public:
         explicit CalibrationWizard (GuitarLabProcessor& p);
 
         void begin();                           // shows the tuning page
+        void resume();                          // the window was opened again during calibration: go on where it was
+        bool keyPressed (const juce::KeyPress&) override; // Space / Enter = Listen
         void feed (const AnalysisFrame& f, double hopSeconds);
         void tick();                            // ~30 times a second: refresh texts
         bool isListening() const { return page == Page::Running; }
@@ -56,14 +60,17 @@ namespace gl
         void finish (bool save);
         juce::String summary() const;
 
+        void startTracker();                    // tracker without calibration, sending no MIDI, while the wizard listens
+        void updateButtons();
+
         GuitarLabProcessor& proc;
-        CalibrationSession session;
+        CalibrationSession& session = proc.work.calSession;
         Page page = Page::Tuning;
 
         juce::Label title, body, instruction, status, stepLabel;
         juce::TextButton startButton { "Quick calibration (1-2 min)" }, fullButton { "Full calibration (15-20 min)" },
                          endFretsButton { "My guitar ends here" }, cancelButton { "Cancel" },
-                         retryButton { "Retry" }, acceptButton { "Accept" }, skipButton { "Skip" },
+                         listenButton { "Listen" }, backButton { "Back" }, acceptButton { "Use it anyway" }, skipButton { "Skip" },
                          saveButton { "Save calibration" }, discardButton { "Discard" };
         double shownProgress = 0.0;
     };
@@ -92,6 +99,8 @@ namespace gl
         static juce::File presetFolder();
         void refreshPresets();
         void loadPreset (const juce::File& file);
+        void loadDefaultCalibration();
+        static constexpr int kDefaultPresetId = 1; // preset files use ids 2, 3, ...
         void savePreset();
         void deletePreset();
         void showPresetMessage (const juce::String& text);

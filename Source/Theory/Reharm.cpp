@@ -1,5 +1,8 @@
 #include "Theory/Reharm.h"
 
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <random>
 
 namespace gl
@@ -118,6 +121,103 @@ namespace gl
         for (const auto& c : chords)
             out.push_back ({ c, beatsEach, false, {} });
         return out;
+    }
+
+    std::vector<TimedChord> parseTimedProgression (const std::string& text, const Key& key, std::string* errorOut)
+    {
+        constexpr double kBar = 4.0;
+        const bool bars = text.find ('|') != std::string::npos;
+        std::vector<TimedChord> out;
+
+        // Bars first (the whole text is one piece when there are no bar lines), then words.
+        std::vector<std::string> pieces (1);
+        for (char c : text)
+            if (c == '|') pieces.emplace_back();
+            else pieces.back() += c;
+
+        for (const auto& piece : pieces)
+        {
+            std::vector<TimedChord> bar;     // beats <= 0: no length typed
+            std::string word;
+            auto flushWord = [&]() -> bool
+            {
+                if (word.empty()) return true;
+                std::string name = word;
+                double beats = 0.0;
+                const auto colon = word.rfind (':');
+                if (colon != std::string::npos)
+                {
+                    name = word.substr (0, colon);
+                    const std::string number = word.substr (colon + 1);
+                    char* end = nullptr;
+                    beats = std::strtod (number.c_str(), &end);
+                    if (number.empty() || end != number.c_str() + number.size() || ! (beats >= 0.25) || beats > 256.0)
+                    {
+                        if (errorOut != nullptr) *errorOut = "Could not read the length in \"" + word + "\" (write e.g. C:2 for 2 beats)";
+                        return false;
+                    }
+                }
+                std::string err;
+                const auto chords = parseProgression (name, key, &err);
+                if (chords.empty())
+                {
+                    if (errorOut != nullptr) *errorOut = err;
+                    return false;
+                }
+                // "I-V-vi" is one word with three chords: the typed text only fits a single chord.
+                for (const auto& c : chords)
+                    bar.push_back ({ c, beats, false, {}, chords.size() == 1 ? name : std::string() });
+                word.clear();
+                return true;
+            };
+
+            for (char c : piece)
+            {
+                if (c == ' ' || c == ',' || c == '\t' || c == '\n' || c == '\r')
+                {
+                    if (! flushWord()) return {};
+                }
+                else
+                    word += c;
+            }
+            if (! flushWord()) return {};
+
+            double typed = 0.0;
+            int open = 0;
+            for (const auto& tc : bar)
+                if (tc.beats > 0.0) typed += tc.beats; else ++open;
+            // In a bar, the chords without a length share what is left (at least half a beat each).
+            const double share = bars ? std::max (0.5, (kBar - typed) / std::max (1, open)) : kBar;
+            for (auto& tc : bar)
+            {
+                if (tc.beats <= 0.0) tc.beats = share;
+                out.push_back (tc);
+            }
+        }
+
+        if (out.empty() && errorOut != nullptr)
+            *errorOut = "No chords found";
+        return out;
+    }
+
+    std::string progressionToText (const std::vector<TimedChord>& chords, bool preferFlats)
+    {
+        std::string s;
+        for (const auto& tc : chords)
+        {
+            if (! s.empty()) s += ' ';
+            s += tc.text.empty() ? tc.chord.name (preferFlats) : tc.text;
+            if (std::abs (tc.beats - 4.0) > 1.0e-6)
+            {
+                char number[32];
+                std::snprintf (number, sizeof (number), "%.3f", tc.beats);
+                std::string n (number);
+                while (n.back() == '0') n.pop_back();   // 2.500 -> 2.5, 2.000 -> 2.
+                if (n.back() == '.') n.pop_back();
+                s += ":" + n;
+            }
+        }
+        return s;
     }
 
     // -----------------------------------------------------------------------

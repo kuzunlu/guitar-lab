@@ -12,6 +12,7 @@ Tab order (= the `Tab` enum in `PluginEditor.h`, = the `addTab` order):
    - *Hex* (hexaphonic pickup, one input per string): every string tracked on its own.
    Calibration wizard: tuning first, then Quick (silence, open strings, 12th fret, soft/hard) or Full
    (every fret on every string, ~37 chords in mono/poly, soft and hard picking on every string).
+   One thing at a time: press Listen (or Space), play, OK, next; Back goes to the step before.
    Calibrations can be saved and loaded as **presets** (files, shared by all projects).
    **Intonation report** (`UI/IntonationView`): from a Full calibration, how far every fret plays from its open string.
 2. **Play & Write** – play the neck live (drag = bend / slide) and write MIDI phrases (up to 512 bars) with
@@ -23,7 +24,8 @@ Tab order (= the `Tab` enum in `PluginEditor.h`, = the `addTab` order):
    (`Midi/ChordTimeline`); "To Reharm Lab" sends them there.
 3. **Chord Shapes** – type or pick any chord symbol (`Cmaj7`, `F#m7b5`, `G7#9`, `D/F#`, `E7alt`) and see every
    playable shape for this tuning as chord diagrams (`parseChordName` + `findShapes`).
-4. **Reharm Lab** – type a progression (`I V vi IV`, `Dm7 G7 Cmaj7`), get substitutions
+4. **Reharm Lab** – type a progression (`I V vi IV`, `Dm7 G7 Cmaj7`, lengths `C:2 G:2 Am F:8` or `| C G | Am |`,
+   or drag the line between two chord cards), get substitutions
    (tritone sub, secondary dominant, borrowed chord, passing diminished, related ii-V, diatonic sub,
    backdoor dominant, extensions) with playable, voice-led voicings.
 5. **Trainer** – note-name, find-the-note, arpeggio and interval quizzes, focused on chosen strings
@@ -73,7 +75,7 @@ Inno Setup is not installed on the dev machine; CI installs it. Do not install i
 | `Source/Midi/` | `Phrase` (the note/technique model), `MidiRenderer` (phrase -> MIDI events), `PhraseRecorder` (tracked MIDI -> phrase notes), `TabExport` (tab text for a note; text tab, PDF, MusicXML and GP3 files), `ChordTimeline` (phrase -> chord names over time) | **No** |
 | `Source/Tracking/` | `PitchDetector` (YIN on a downsampled copy), `Spectrum` (FFT, tone colour, chroma), `Calibration` + `CalibrationSession` (wizard logic), `GuitarTracker` (audio -> notes/bends/velocity/chords; runs `PolyTracker` in poly mode) | **No** |
 | `Source/Audio/` | `PluckSynth`: small built-in plucked-string sound (one voice per MIDI channel) | Yes |
-| `Source/UI/` | Fretboard, piano, top bar, the five tab panels (`ShapesPanel` = Chord Shapes), `IntonationView`, theme + tooltip look. The top bar's **Manual** button opens `Manual/index.html` next to the app, else the latest GitHub release | Yes |
+| `Source/UI/` | Fretboard, piano, top bar, the five tab panels (`ShapesPanel` = Chord Shapes), `IntonationView`, theme + tooltip look, `Tooltip.h` (tooltips wait 1 s), `UiMemory.h` (panel state that survives closing the window). The top bar's **Manual** button opens `Manual/index.html` next to the app, else the latest GitHub release | Yes |
 | `Source/PluginProcessor.*` | Parameters, state save/load, playback in sync with the host, live notes | Yes |
 | `Source/PluginEditor.*` | Lays out the window and routes fretboard/piano clicks to the open tab | Yes |
 | `Tests/CoreTests.cpp` | Plain asserts for `Theory/`, `Midi/` and `Tracking/` (no framework) | No |
@@ -143,6 +145,18 @@ Keep `Theory/`, `Midi/` and `Tracking/` free of JUCE, so they stay testable and 
   (WAV) are the best test when the owner has them.
 - Tracking tests use synthetic decaying sawtooth "plucks" in `Tests/CoreTests.cpp`. Add a test there for any
   change to note start/stop, bend vs. legato decisions, or the calibration steps.
+- **The window can be deleted at any time** (DAWs delete the editor when they hide it). Nothing may live only in a
+  panel: control settings are remembered with `UiMemory` (`memory.remember (control, "key")`, saved in
+  `proc.uiState` and in the project); work in progress (reharm result, trainer question, undo history, the
+  calibration session) lives in `proc.work` and panels use it through references. `UiMemory` must be the LAST
+  member of a panel. Open tab and window size are in `proc.uiState` too. Add new controls to the memory.
+- **One scroll bar for the whole page** (`GuitarLabEditor::layoutPage`). Panels do not scroll up/down by themselves:
+  a panel with a growing list reports `heightFor (width)` and calls `onHeightChanged`; the editor makes the page
+  taller. Only the Play & Write tab view scrolls sideways.
+- **Calibration flow (`CalibrationSession`):** Ready -> `listen()` -> Listening -> OK (next item, Ready) or Decide
+  (Again / Use it anyway / Skip). Frames only count while listening, and only after a NEW pick attack (or sound after
+  a quiet moment), so a note still ringing from the step before is ignored. Each fret of a Full calibration is its own
+  item. `back()` restores the snapshot taken before the previous item. 10 s of nothing: back to Ready.
 - **Every control needs a detailed tooltip.** First line = short title (shown bold), then plain-English lines
   that explain what it does and when to use it. Components that change by hover (fretboard, piano, tab view,
   chord cards) implement `getTooltip()` to describe what is under the mouse.

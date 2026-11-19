@@ -19,6 +19,7 @@ namespace gl
     // the beat), so arpeggios count as their chord. Single notes (melody) give no chord.
     std::vector<ChordSpan> chordTimeline (const Phrase& phrase, const Instrument& inst, bool flats = false);
 
-    // The chords as one line for the Reharm Lab ("Am F C G"): names it can read, without slash basses.
+    // The chords as one line for the Reharm Lab ("Am F:2 C:6 G"): names it can read, without slash basses, with
+    // ":beats" when a chord is not one bar (4 beats) long. The same chord twice in a row is one longer chord.
     std::string chordsForReharm (const std::vector<ChordSpan>& spans);
 }

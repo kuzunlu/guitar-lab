@@ -14,6 +14,7 @@ namespace gl
         double beats = 4.0;
         bool   substituted = false; // true when the reharm engine created or changed it
         std::string reason;         // short explanation, empty for original chords
+        std::string text;           // the chord as the user typed it ("vi", "Em7"), empty for engine chords
     };
 
     enum class SubKind
@@ -59,4 +60,12 @@ namespace gl
 
     // Helper: wraps plain chords as one bar each.
     std::vector<TimedChord> toTimed (const std::vector<Chord>& chords, double beatsEach = 4.0);
+
+    // Like parseProgression, with lengths. "C:2" = 2 beats (any length, like G:1.5). Between bar lines
+    // ("| C G | Am |") the chords share the 4-beat bar equally, after the ones with their own length.
+    // Without bar lines every chord without a length gets one bar (4 beats).
+    std::vector<TimedChord> parseTimedProgression (const std::string& text, const Key& key, std::string* errorOut = nullptr);
+
+    // The other way: each chord as typed (or its name), with ":beats" when it is not 4 beats long.
+    std::string progressionToText (const std::vector<TimedChord>& chords, bool preferFlats);
 }

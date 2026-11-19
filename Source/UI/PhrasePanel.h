@@ -6,6 +6,7 @@
 #include "PluginProcessor.h"
 #include "UI/FretboardComponent.h"
 #include "UI/Theme.h"
+#include "UI/UiMemory.h"
 
 namespace gl
 {
@@ -83,6 +84,7 @@ namespace gl
         std::vector<FretboardComponent::Mark> marks() const;
 
         void refresh();            // after the phrase was changed elsewhere
+        void restoreUi();          // after a project was loaded: the controls come back
         std::function<void (const juce::String&)> onSendChords; // "To Reharm Lab": the chords as a progression
         void timerTick();          // called by the editor ~30 times a second
 
@@ -146,7 +148,7 @@ namespace gl
                          earlierButton { "<" }, laterButton { ">" }, pitchUpButton { "+1" }, pitchDownButton { "-1" };
         juce::Label zoomLabel, editLabel;
         std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> metronomeAtt;
-        std::vector<NoteEvent> clipboard;   // starts relative to the first copied note
+        std::vector<NoteEvent>& clipboard = proc.work.clipboard; // starts relative to the first copied note (kept in the processor)
         float zoom = 1.0f;
         bool  autoFit = true;               // short phrases fill the width
         bool  playbackForRecording = false; // Play was started by the count-in: stop it with the recording
@@ -163,10 +165,12 @@ namespace gl
         std::vector<GuitarLabProcessor::RecordEvent> recordBuffer = std::vector<GuitarLabProcessor::RecordEvent> (4096);
 
         std::vector<FretPos> chordBuilder;
-        std::vector<std::string> undoStack;
+        std::vector<std::string>& undoStack = proc.work.phraseUndo; // kept in the processor: survives closing the window
+        int restoreViewX = -1;                 // scroll position to put back after the first layout
         bool loadingControls = false;
         int  liveString = -1;
 
         std::unique_ptr<juce::FileChooser> chooser;
+        UiMemory memory { proc.uiState, "Phrase" }; // last member: see UiMemory
     };
 }

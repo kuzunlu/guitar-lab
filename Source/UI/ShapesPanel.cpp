@@ -270,13 +270,26 @@ namespace gl
         areaBox.onChange = [this] { search(); };
         addAndMakeVisible (areaBox);
 
-        label (notesLabel, "Strings", "Strings played\nHow many strings a shape must use. More strings = a fuller sound to strum. "
-                                      "Fewer = small shapes for jazz, funk and higher voicings.");
-        notesBox.setTooltip (notesLabel.getTooltip());
-        notesBox.addItemList ({ "2 or more", "3 or more", "4 or more", "5 or more", "6 or more" }, 1);
-        notesBox.setSelectedId (3, juce::dontSendNotification);
-        notesBox.onChange = [this] { search(); };
-        addAndMakeVisible (notesBox);
+        label (notesLabel, "Strings", "Strings played\nHow many strings a shape uses: from the left number to the right number. "
+                                      "More strings = a fuller sound to strum. Fewer = small shapes for jazz, funk and higher voicings.\n"
+                                      "Example: 3 to 4 = only small shapes. 7 to 7 = shapes that use every string of a 7-string.");
+        label (notesToLabel, "to", notesLabel.getTooltip());
+        notesToLabel.setJustificationType (juce::Justification::centred);
+        for (auto* b : { &notesBox, &maxNotesBox })
+        {
+            b->setTooltip (notesLabel.getTooltip());
+            b->onChange = [this, b]
+            {
+                // Keep from <= to: moving one past the other moves the other along.
+                if (b == &notesBox && maxNotesBox.getSelectedId() < notesBox.getSelectedId())
+                    maxNotesBox.setSelectedId (notesBox.getSelectedId(), juce::dontSendNotification);
+                if (b == &maxNotesBox && notesBox.getSelectedId() > maxNotesBox.getSelectedId())
+                    notesBox.setSelectedId (maxNotesBox.getSelectedId(), juce::dontSendNotification);
+                search();
+            };
+            addAndMakeVisible (b);
+        }
+        fillStringBoxes();
 
         rootBass.setTooltip ("Root lowest\nOn: the lowest note of every shape is the root (or the note after '/' in a slash chord), "
                              "so the chord sounds solid and clear.\nOff: inversions too (another chord note lowest).");
@@ -297,19 +310,46 @@ namespace gl
         addAndMakeVisible (status);
 
         grid.onClick = [this] (int i) { choose (i); };
-        view.setViewedComponent (&grid, false);
-        view.setScrollBarsShown (true, false);
-        addAndMakeVisible (view);
+        addAndMakeVisible (grid);
 
+        memory.remember (chordInput, "chord");
+        memory.remember (stretch, "stretch");
+        memory.remember (areaBox, "area");
+        memory.remember (notesBox, "minStrings");
+        memory.remember (maxNotesBox, "maxStrings");
+        memory.remember (rootBass, "rootBass");
+        memory.remember (openStrings, "openStrings");
+        memory.remember (innerMutes, "innerMutes");
+        restoreSelection();
+    }
+
+    void ShapesPanel::restoreSelection()
+    {
+        // search() forgets the chosen shape; it comes back without playing.
+        const int shape = memory.data().getProperty ("shape", -1);
         search();
+        if (shape >= 0 && shape < (int) grid.shapes.size())
+        {
+            grid.selected = shape;
+            memory.data().setProperty ("shape", shape, nullptr);
+            grid.repaint();
+            if (onDisplayChanged) onDisplayChanged();
+        }
+    }
+
+    void ShapesPanel::restoreUi()
+    {
+        memory.restoreAll();
+        fillStringBoxes();
+        restoreSelection();
     }
 
     VoicingOptions ShapesPanel::options() const
     {
         VoicingOptions o;
         o.maxSpan = (int) stretch.getValue(); // same meaning as Hand stretch in the Reharm Lab
-        o.minStrings = notesBox.getSelectedId() + 1;
-        o.maxStrings = proc.instrument.numStrings();
+        o.minStrings = std::max (2, notesBox.getSelectedId());
+        o.maxStrings = std::max (o.minStrings, maxNotesBox.getSelectedId());
         o.rootInBass = rootBass.getToggleState();
         o.allowOpenStrings = openStrings.getToggleState();
         o.allowInnerMutes = innerMutes.getToggleState();
@@ -338,6 +378,7 @@ namespace gl
         }
         grid.inst = proc.instrument;
         grid.selected = -1;
+        memory.data().setProperty ("shape", -1, nullptr);
         grid.shapes.clear();
 
         if (! parsed)
@@ -369,7 +410,7 @@ namespace gl
                 const bool usesOpen = std::find (f.begin(), f.end(), 0) != f.end();
                 bool inArea = true;
                 for (int x : f) if (x > 0 && (x < opt.minFret || x > opt.maxFret)) inArea = false;
-                if (! inArea || (usesOpen && (! opt.allowOpenStrings || opt.minFret > 0)) || c.voicing.numPlayed() < opt.minStrings)
+                if (! inArea || (usesOpen && (! opt.allowOpenStrings || opt.minFret > 0)) || c.voicing.numPlayed() < opt.minStrings || c.voicing.numPlayed() > opt.maxStrings)
                     continue;
                 grid.shapes.push_back (c.voicing);
                 grid.kinds.push_back (juce::String (c.kind));
@@ -393,8 +434,9 @@ namespace gl
             status.setText (text, juce::dontSendNotification);
         }
 
-        grid.setSize (std::max (100, view.getMaximumVisibleWidth()), grid.heightFor (std::max (100, view.getMaximumVisibleWidth())));
+        grid.setSize (std::max (100, getWidth() - 12), grid.heightFor (std::max (100, getWidth() - 12)));
         grid.repaint();
+        if (onHeightChanged) onHeightChanged();
         if (onDisplayChanged) onDisplayChanged();
     }
 
@@ -402,6 +444,7 @@ namespace gl
     {
         if (index < 0 || index >= (int) grid.shapes.size()) return;
         grid.selected = index;
+        memory.data().setProperty ("shape", index, nullptr);
         grid.repaint();
         playShape (grid.shapes[(size_t) index]);
         if (onDisplayChanged) onDisplayChanged();
@@ -409,8 +452,9 @@ namespace gl
 
     void ShapesPanel::playShape (const Voicing& v)
     {
-        // Strum low to high (25 ms apart), let it ring, then stop.
+        // Strum low to high (25 ms apart), let it ring, then stop. A new chord cuts off the one before.
         const int token = ++playToken;
+        proc.allLiveNotesOff();
         juce::Component::SafePointer<ShapesPanel> safe (this);
         int delay = 0;
         for (int s = (int) v.frets.size() - 1; s >= 0; --s)
@@ -453,9 +497,33 @@ namespace gl
         return layer;
     }
 
+    void ShapesPanel::fillStringBoxes()
+    {
+        // Item id = number of strings (2 .. all). "To" stays at "all strings" when it was there before.
+        const int n = proc.instrument.numStrings();
+        const int oldCount = maxNotesBox.getNumItems() + 1;
+        const int from = notesBox.getSelectedId() > 0 ? notesBox.getSelectedId() : 4;
+        const int to = maxNotesBox.getSelectedId() > 0 && maxNotesBox.getSelectedId() < oldCount ? maxNotesBox.getSelectedId() : n;
+        for (auto* b : { &notesBox, &maxNotesBox })
+        {
+            b->clear (juce::dontSendNotification);
+            for (int k = 2; k <= n; ++k)
+                b->addItem (juce::String (k), k);
+        }
+        notesBox.setSelectedId (juce::jlimit (2, n, from), juce::dontSendNotification);
+        maxNotesBox.setSelectedId (juce::jlimit (notesBox.getSelectedId(), n, to), juce::dontSendNotification);
+    }
+
     void ShapesPanel::refresh()
     {
+        fillStringBoxes();
         search();
+    }
+
+    int ShapesPanel::heightFor (int width) const
+    {
+        // Same rows as resized(): margin, two rows of controls, the status line, then every card.
+        return 6 + 30 + 30 + 24 + grid.heightFor (std::max (100, width - 12)) + 6;
     }
 
     void ShapesPanel::paint (juce::Graphics& g)
@@ -477,13 +545,13 @@ namespace gl
         auto b = row();
         put (b, stretchLabel, 86); put (b, stretch, 130);
         put (b, areaLabel, 40);    put (b, areaBox, 200);
-        put (b, notesLabel, 54);   put (b, notesBox, 100);
+        put (b, notesLabel, 54);   put (b, notesBox, 50);
+        put (b, notesToLabel, 26); put (b, maxNotesBox, 50);
         put (b, rootBass, 110);    put (b, openStrings, 110);
         put (b, innerMutes, 170);
 
         status.setBounds (row (20));
-        view.setBounds (r);
-        const int w = std::max (100, view.getMaximumVisibleWidth());
-        grid.setSize (w, grid.heightFor (w));
+        const int w = std::max (100, r.getWidth());
+        grid.setBounds (r.getX(), r.getY(), w, grid.heightFor (w));
     }
 }

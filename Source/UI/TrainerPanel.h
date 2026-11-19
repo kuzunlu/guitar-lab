@@ -3,6 +3,7 @@
 #include "PluginProcessor.h"
 #include "UI/FretboardComponent.h"
 #include "UI/Theme.h"
+#include "UI/UiMemory.h"
 
 #include <set>
 
@@ -14,6 +15,7 @@ namespace gl
         explicit TrainerPanel (GuitarLabProcessor& p);
 
         void refresh();     // after the instrument changed or a project was loaded
+        void restoreUi();   // after a project was loaded: the controls come back
 
         // Fretboard and piano input while this tab is shown.
         void fretPressed (FretPos pos);
@@ -57,13 +59,17 @@ namespace gl
         juce::TextButton nextButton { "Start" }, checkButton { "Check" }, resetButton { "Reset stats" }, replayButton { "Play again" };
         juce::OwnedArray<juce::TextButton> answerButtons; // 12 notes or 12 intervals
 
-        std::optional<Question> question;
-        std::vector<FretPos> clicked, missed, wrong;
-        bool answered = false;
+        // The open question lives in the processor, so it is still there when the window opens again.
+        std::optional<Question>& question = proc.work.question;
+        std::vector<FretPos>& clicked = proc.work.clicked;
+        std::vector<FretPos>& missed = proc.work.missed;
+        std::vector<FretPos>& wrong = proc.work.wrong;
+        bool& answered = proc.work.answered;
         double askedAt = 0.0;
         int liveString = -1;
         int playToken = 0;
         double ignoreUntil = 0.0;          // the question's own notes are not an answer
         std::set<MidiNote> lastHeard;
+        UiMemory memory { proc.uiState, "Trainer" }; // last member: see UiMemory
     };
 }

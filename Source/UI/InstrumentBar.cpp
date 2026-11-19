@@ -332,6 +332,16 @@ namespace gl
                                  "A longer text like v0.1.0-3-gabc1234 means a test build, 3 changes after v0.1.0.");
         addAndMakeVisible (versionLabel);
 
+        memory.remember (scaleRootBox, "scaleRoot");
+        memory.remember (scaleTypeBox, "scaleType");
+        memory.remember (namesToggle, "allNames");
+        memory.remember (flatsToggle, "flats");
+        refresh();
+    }
+
+    void InstrumentBar::restoreUi()
+    {
+        memory.restoreAll();
         refresh();
     }
 

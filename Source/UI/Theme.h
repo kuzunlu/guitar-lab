@@ -37,6 +37,22 @@ namespace gl::theme
             setColour (juce::TooltipWindow::outlineColourId, accent.withAlpha (0.6f));
             setColour (juce::TabbedButtonBar::tabOutlineColourId, panelLight);
             setColour (juce::TabbedComponent::backgroundColourId, panel);
+            setColour (juce::Slider::backgroundColourId, panelLight.brighter (0.35f)); // the empty part of the track stays visible
+        }
+
+        // Sliders: a small stop at each end of the track (taller than the knob), so it is clear where the range starts and ends.
+        void drawLinearSlider (juce::Graphics& g, int x, int y, int width, int height, float sliderPos, float minSliderPos,
+                               float maxSliderPos, juce::Slider::SliderStyle style, juce::Slider& slider) override
+        {
+            if (! slider.isBar() && slider.isHorizontal())
+            {
+                const float mid = (float) y + (float) height * 0.5f;
+                const float h = juce::jmin ((float) height * 0.8f, 18.0f);
+                g.setColour (textDim);
+                g.fillRoundedRectangle ((float) x - 1.0f, mid - h * 0.5f, 2.0f, h, 1.0f);
+                g.fillRoundedRectangle ((float) (x + width) - 1.0f, mid - h * 0.5f, 2.0f, h, 1.0f);
+            }
+            juce::LookAndFeel_V4::drawLinearSlider (g, x, y, width, height, sliderPos, minSliderPos, maxSliderPos, style, slider);
         }
 
         // Tooltips: wider and left-aligned so long help texts are easy to read.

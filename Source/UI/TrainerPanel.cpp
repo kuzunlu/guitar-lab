@@ -117,6 +117,30 @@ namespace gl
         scoreLabel.setTooltip ("Score\nTotal questions, how many you got right, and your current streak of right answers in a row.");
         addAndMakeVisible (scoreLabel);
 
+        memory.remember (modeBox, "mode");
+        memory.remember (minFret, "minFret");
+        memory.remember (maxFret, "maxFret");
+        memory.remember (naturalsToggle, "naturals");
+        memory.remember (adaptiveToggle, "adaptive");
+        memory.remember (heatToggle, "heatMap");
+        proc.trainer.setAdaptive (adaptiveToggle.getToggleState());
+
+        // A question that was open when the window closed comes back (without playing it again).
+        if (question)
+        {
+            promptLabel.setText (juce::String (question->prompt), juce::dontSendNotification);
+            feedbackLabel.setColour (juce::Label::textColourId, proc.work.trainerFeedbackGood ? theme::good : theme::bad);
+            feedbackLabel.setText (proc.work.trainerFeedback, juce::dontSendNotification);
+            nextButton.setButtonText ("Next");
+            askedAt = juce::Time::getMillisecondCounterHiRes();
+        }
+        refresh();
+    }
+
+    void TrainerPanel::restoreUi()
+    {
+        memory.restoreAll();
+        proc.trainer.setAdaptive (adaptiveToggle.getToggleState());
         refresh();
     }
 
@@ -135,6 +159,11 @@ namespace gl
             t->onClick = [this] { applyFocus(); };
             addAndMakeVisible (t);
         }
+        // Remembered string choice ("110111"), when it was made for this many strings.
+        const auto ticks = memory.data().getProperty ("strings").toString();
+        if (ticks.length() == count)
+            for (int s = 0; s < count; ++s)
+                stringToggles[s]->setToggleState (ticks[s] == '1', juce::dontSendNotification);
 
         proc.trainer.setInstrument (proc.instrument);
         updateAnswerButtons();
@@ -146,8 +175,13 @@ namespace gl
     void TrainerPanel::applyFocus()
     {
         QuizFocus f;
+        juce::String ticks;
         for (auto* t : stringToggles)
+        {
             f.strings.push_back (t->getToggleState());
+            ticks << (t->getToggleState() ? "1" : "0");
+        }
+        memory.data().setProperty ("strings", ticks, nullptr);
         f.minFret = (int) minFret.getValue();
         f.maxFret = (int) maxFret.getValue();
         f.naturalsOnly = naturalsToggle.getToggleState();
@@ -202,6 +236,7 @@ namespace gl
         if (! question) return;
         // Chords are strummed (40 ms between strings), intervals are played one note after the other.
         const int token = ++playToken;
+        proc.allLiveNotesOff(); // the old token's note-offs will not run
         juce::Component::SafePointer<TrainerPanel> safe (this);
         const bool together = question->playTogether;
         const auto spots = question->shown;
@@ -251,6 +286,7 @@ namespace gl
 
         promptLabel.setText (juce::String (question->prompt), juce::dontSendNotification);
         feedbackLabel.setText ({}, juce::dontSendNotification);
+        proc.work.trainerFeedback = {};
         nextButton.setButtonText ("Next");
 
         // Play the shown note(s), so you also train your ear (ear quizzes: strummed or one after another).
@@ -274,6 +310,8 @@ namespace gl
         feedbackLabel.setColour (juce::Label::textColourId, ok ? theme::good : theme::bad);
         feedbackLabel.setText ((ok ? "Right! " : "Not quite. ") + detail + "   (" + juce::String (secondsSinceAsked(), 1) + " s)",
                                juce::dontSendNotification);
+        proc.work.trainerFeedback = feedbackLabel.getText();
+        proc.work.trainerFeedbackGood = ok;
         updateScore();
         if (onDisplayChanged) onDisplayChanged();
 

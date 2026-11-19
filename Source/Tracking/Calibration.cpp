@@ -47,6 +47,7 @@ namespace gl
         constexpr int    kHitsNeeded       = 4;
         constexpr int    kStrumsNeeded     = 3;
         constexpr double kInTuneCents      = 60.0;
+        constexpr double kListenTimeout    = 10.0; // seconds without a clear note: stop listening
     }
 
     // =======================================================================
@@ -291,6 +292,9 @@ namespace gl
         full = fullCalibration;
         softLevels.clear();
         hardLevels.clear();
+        bleedSum.fill (0.0);
+        bleedCount.fill (0);
+        previousNote = -1;
 
         const int lowest = inst.numStrings() - 1;
         plan.clear();
@@ -298,9 +302,10 @@ namespace gl
 
         if (full)
         {
-            // Every fret of every string (this also covers the open strings and the 12th fret).
+            // Every fret of every string, one item each (this also covers the open strings and the 12th fret).
             for (int s = lowest; s >= 0; --s)
-                plan.push_back ({ Step::EveryNote, s });
+                for (int f = 0; f <= cal.lastFret[(size_t) s]; ++f)
+                    plan.push_back ({ Step::EveryNote, s, f });
 
             // Chords only help in mono mode: hex mode hears every string on its own anyway.
             if (! hexMode)
@@ -336,7 +341,8 @@ namespace gl
 
         stepIndex = 0;
         spotLevels.clear();
-        for (auto& v : silence) v.clear();
+        history.clear();
+        say ({}, true);
         beginStep();
     }
 
@@ -382,12 +388,20 @@ namespace gl
         return "string " + std::to_string (s + 1) + " (" + note + ")";
     }
 
+    CalibrationSession::Phase CalibrationSession::phase() const
+    {
+        if (current == Step::Done) return Phase::Done;
+        if (needDecision)          return Phase::Decide;
+        if (listening)             return Phase::Listening;
+        return Phase::Ready;
+    }
+
     std::string CalibrationSession::instruction() const
     {
         const auto name = stringName (currentString());
         switch (current)
         {
-            case Step::Silence:     return "Please be quiet. Do not touch the strings for 3 seconds (rest your hand on them to mute them).";
+            case Step::Silence:     return "Stay quiet for 3 seconds. Do not touch the strings (rest your hand on them to mute them).";
             case Step::OpenString:  return "Play the OPEN " + name + " and let it ring.";
             case Step::TwelfthFret: return "Play the 12th FRET on the " + name + " and let it ring.";
             case Step::EveryNote:
@@ -411,25 +425,40 @@ namespace gl
         return {};
     }
 
-    void CalibrationSession::beginStep()
+    void CalibrationSession::clearMeasurement()
     {
-        current = plan[(size_t) stepIndex].step;
         elapsed = progress = noteTime = 0.0;
-        needDecision = noteActive = false;
+        noteActive = false;
         pitches.clear();
         peaks.clear();
         timbres.clear();
         chromas.clear();
         channelEnergy.fill (0.0f);
-        bleedSum.fill (0.0);
-        bleedCount.fill (0);
-        statusText.clear();
-        fret = 0;
-        previousNote = -1;
         strums = 0;
+        chromasAtStrumStart = 0;
+        for (auto& v : silence) v.clear();
+    }
 
+    void CalibrationSession::beginStep()
+    {
+        // Remember everything measured before this item, so back() can return to it exactly.
+        history.resize ((size_t) stepIndex);
+        history.push_back ({ cal, plan, spotLevels, softLevels, hardLevels, bleedSum, bleedCount });
+
+        const auto& item = plan[(size_t) stepIndex];
+        current = item.step;
+        fret = item.step == Step::EveryNote ? item.fret : 0;
+        listening = needDecision = false;
+        clearMeasurement();
+
+        // "Every note" in hex mode: how much a string leaks into the other inputs is averaged over its frets.
+        if (current == Step::EveryNote && fret == 0)
+        {
+            bleedSum.fill (0.0);
+            bleedCount.fill (0);
+        }
         if (current == Step::Chord)
-            chordIndex = plan[(size_t) stepIndex].string;
+            chordIndex = item.string;
         if (current == Step::Done)
             finalise();
     }
@@ -448,18 +477,49 @@ namespace gl
 
     void CalibrationSession::finishStep()
     {
-        // "Every note" in hex mode: keep how much this string leaks into every input.
-        if (current == Step::EveryNote && cal.hexMode)
-        {
-            const int s = currentString();
-            for (int c = 0; c < inputs; ++c)
-                if (bleedCount[(size_t) c] > 0)
-                    cal.bleed[(size_t) s][(size_t) c] = (float) (bleedSum[(size_t) c] / bleedCount[(size_t) c]);
-        }
-
+        listening = false;
         if (stepIndex + 1 < (int) plan.size())
             ++stepIndex;
         beginStep();
+    }
+
+    void CalibrationSession::listen()
+    {
+        if (current == Step::Done) return;
+        needDecision = false;
+        clearMeasurement();
+        listening = true;
+        listenTime = 0.0;
+        armed = false;
+        quietSeen.fill (false);
+        heardBefore.fill (false);
+        attackEnvelope.fill (0.0f);
+        say (current == Step::Silence ? "Listening to the silence..." : "Listening... play now.", true);
+    }
+
+    void CalibrationSession::stop()
+    {
+        if (! listening) return;
+        listening = false;
+        clearMeasurement();
+        say ("Stopped. Press Listen when you are ready.", true);
+    }
+
+    void CalibrationSession::back()
+    {
+        if (stepIndex == 0) return;
+        --stepIndex;
+        const auto h = history[(size_t) stepIndex];
+        cal = h.cal;
+        plan = h.plan;
+        spotLevels = h.spotLevels;
+        softLevels = h.softLevels;
+        hardLevels = h.hardLevels;
+        bleedSum = h.bleedSum;
+        bleedCount = h.bleedCount;
+        previousNote = -1;
+        beginStep();
+        say ("Back one step. Its result was forgotten: press Listen and play it again.", true);
     }
 
     void CalibrationSession::noMoreFrets()
@@ -467,8 +527,15 @@ namespace gl
         if (current != Step::EveryNote) return;
         const int last = std::max (0, fret - 1);
         for (auto& lf : cal.lastFret) lf = last; // guitars have the same number of frets on every string
-        statusText = "OK: this guitar has " + std::to_string (last) + " frets.";
-        finishStep();
+
+        // The frets past the end are not asked for on any string.
+        for (int k = (int) plan.size() - 1; k >= stepIndex; --k)
+            if (plan[(size_t) k].step == Step::EveryNote && plan[(size_t) k].fret > last)
+                plan.erase (plan.begin() + k);
+        listening = false;
+        history.resize ((size_t) stepIndex); // beginStep() takes the snapshot of this item again
+        beginStep();
+        say ("OK: this guitar has " + std::to_string (last) + " frets.", true);
     }
 
     void CalibrationSession::accept()
@@ -482,13 +549,11 @@ namespace gl
                 auto t = *ch;
                 t.chroma = meanChroma (chromas);
                 cal.chords.push_back (t);
+                say ("OK: " + ch->name + " kept.", true);
             }
             finishStep();
             return;
         }
-
-        const int s = currentString();
-        auto& sc = cal.strings[(size_t) s];
 
         if (current == Step::EveryNote)
         {
@@ -499,44 +564,24 @@ namespace gl
             return;
         }
 
+        const int s = currentString();
+        auto& sc = cal.strings[(size_t) s];
         if (current == Step::OpenString) { sc.centsOffset = pendingCents; sc.measured = true; }
         else                             { sc.intonationCents = pendingCents - (sc.measured ? sc.centsOffset : 0.0); }
+        say ("OK: kept as it is.", true);
         finishStep();
-    }
-
-    void CalibrationSession::retry()
-    {
-        if (current == Step::EveryNote)
-        {
-            // Measure the same fret again, keep the frets already done.
-            needDecision = noteActive = false;
-            pitches.clear(); peaks.clear(); timbres.clear();
-            channelEnergy.fill (0.0f);
-            progress = 0.0;
-            statusText.clear();
-            return;
-        }
-        beginStep();
     }
 
     void CalibrationSession::skip()
     {
-        if (current == Step::EveryNote)
-        {
-            needDecision = noteActive = false;
-            pitches.clear(); peaks.clear(); timbres.clear();
-            channelEnergy.fill (0.0f);
-            statusText = "Skipped fret " + std::to_string (fret) + ".";
-            if (++fret > cal.lastFret[(size_t) currentString()])
-                finishStep();
-            return;
-        }
+        say (current == Step::EveryNote ? "Skipped fret " + std::to_string (fret) + "." : std::string ("Skipped."), true);
         finishStep();
     }
 
     // -----------------------------------------------------------------------
     void CalibrationSession::evaluatePitch()
     {
+        listening = false;
         const int s = currentString();
         const double heard = hzToMidi (median (pitches));
         const int expected = expectedNote();
@@ -544,6 +589,7 @@ namespace gl
         const std::string heardName = midiNoteName ((int) std::lround (heard));
 
         auto& sc = cal.strings[(size_t) s];
+        std::string warning;
 
         // In hex mode, the loudest input during this note is this string's channel.
         if (cal.hexMode)
@@ -558,8 +604,8 @@ namespace gl
 
             for (int other = 0; other < inst.numStrings(); ++other)
                 if (other != s && cal.strings[(size_t) other].inputChannel == loudest && cal.strings[(size_t) other].measured)
-                    statusText = "Warning: input " + std::to_string (loudest + 1) + " was also loudest for another string. "
-                                 "Check the pickup cable / channel order. ";
+                    warning = "Warning: input " + std::to_string (loudest + 1) + " was also loudest for another string. "
+                              "Check the pickup cable / channel order. ";
         }
 
         if (std::abs (cents) <= kInTuneCents)
@@ -569,9 +615,9 @@ namespace gl
 
             std::ostringstream msg;
             msg.precision (0);
-            msg << std::fixed << "Heard " << heardName << ", " << std::abs (cents) << " cents "
-                << (cents >= 0 ? "sharp" : "flat") << ". Good.";
-            statusText += msg.str();
+            msg << std::fixed << warning << "OK: heard " << heardName << ", " << std::abs (cents) << " cents "
+                << (cents >= 0 ? "sharp" : "flat") << ".";
+            say (msg.str(), warning.empty());
             finishStep();
             return;
         }
@@ -581,10 +627,8 @@ namespace gl
             for (int other = 0; other < inst.numStrings(); ++other)
                 if (other != s && std::abs ((heard - inst.tuning()[(size_t) other]) * 100.0) <= kInTuneCents)
                 {
-                    statusText = "That sounded like the " + stringName (other) + ". Please play the " + stringName (s) + ".";
-                    pitches.clear();
-                    peaks.clear();
-                    progress = 0.0;
+                    say ("That sounded like the " + stringName (other) + ". Press Listen and play the " + stringName (s) + ".", false);
+                    clearMeasurement();
                     return;
                 }
 
@@ -592,13 +636,14 @@ namespace gl
         needDecision = true;
         std::ostringstream msg;
         msg.precision (0);
-        msg << std::fixed << "Heard " << heardName << ": " << std::abs (cents) << " cents " << (cents >= 0 ? "too high" : "too low")
-            << ". Tune the string and press Retry, or press Accept to calibrate to the way it is now.";
-        statusText += msg.str();
+        msg << std::fixed << warning << "Heard " << heardName << ": " << std::abs (cents) << " cents " << (cents >= 0 ? "too high" : "too low")
+            << ". Tune the string and press Again, or press 'Use it anyway' to calibrate to the way it is now.";
+        say (msg.str(), false);
     }
 
     void CalibrationSession::evaluateEveryNote()
     {
+        listening = false;
         const int s = currentString();
         const int expected = expectedNote();
         const double heard = pitches.empty() ? expected + pendingCents / 100.0 : hzToMidi (median (pitches));
@@ -612,11 +657,9 @@ namespace gl
             const int heardFret = heardNote - inst.tuning()[(size_t) s];
             if (heardFret != fret && std::abs (heardNote - expected) <= 2 && std::abs (heard - heardNote) < 0.4)
             {
-                statusText = "That was fret " + std::to_string (heardFret) + ". Please play fret " + std::to_string (fret) + ".";
+                say ("That was fret " + std::to_string (heardFret) + ". Press Listen and play fret " + std::to_string (fret) + ".", false);
                 previousNote = heardNote;
-                pitches.clear(); peaks.clear(); timbres.clear();
-                channelEnergy.fill (0.0f);
-                noteActive = false;
+                clearMeasurement();
                 return;
             }
 
@@ -625,8 +668,8 @@ namespace gl
             std::ostringstream msg;
             msg.precision (0);
             msg << std::fixed << "Fret " << fret << " sounds " << std::abs (cents) << " cents " << (cents >= 0 ? "too high" : "too low")
-                << ". Retry, Accept (calibrate to it), or Skip this fret.";
-            statusText = msg.str();
+                << ". Again, 'Use it anyway' (calibrate to it), or Skip this fret.";
+            say (msg.str(), false);
             return;
         }
 
@@ -661,21 +704,19 @@ namespace gl
                     bleedSum[(size_t) c] += channelEnergy[(size_t) c] / channelEnergy[(size_t) loudest];
                     ++bleedCount[(size_t) c];
                 }
+            // How much this string leaks into every input (average of its frets so far).
+            for (int c = 0; c < inputs; ++c)
+                if (bleedCount[(size_t) c] > 0)
+                    cal.bleed[(size_t) s][(size_t) c] = (float) (bleedSum[(size_t) c] / bleedCount[(size_t) c]);
         }
 
         std::ostringstream msg;
         msg.precision (0);
-        msg << std::fixed << "Fret " << fret << ": " << std::abs (cents) << " cents " << (cents >= 0 ? "sharp" : "flat") << ". Good.";
-        statusText = msg.str();
+        msg << std::fixed << "OK: fret " << fret << ", " << std::abs (cents) << " cents " << (cents >= 0 ? "sharp" : "flat") << ".";
+        say (msg.str(), true);
 
         previousNote = expected;
-        pitches.clear(); peaks.clear(); timbres.clear();
-        channelEnergy.fill (0.0f);
-        noteActive = false;
-        needDecision = false;
-
-        if (++fret > cal.lastFret[(size_t) s])
-            finishStep();
+        finishStep();
     }
 
     void CalibrationSession::feedChord (const AnalysisFrame& f, double hop)
@@ -706,6 +747,7 @@ namespace gl
         if (strums < kStrumsNeeded || noteActive)
             return;
 
+        listening = false;
         auto* ch = currentChord();
         if (ch == nullptr) { finishStep(); return; }
 
@@ -721,21 +763,34 @@ namespace gl
         if (chromaSimilarity (heard, ideal) < 0.6f)
         {
             needDecision = true;
-            statusText = "This does not sound much like " + ch->name + ". Check the shape on the fretboard and press Retry, "
-                         "or press Accept to keep it.";
+            say ("This does not sound much like " + ch->name + ". Check the shape on the fretboard and press Again, "
+                 "or press 'Use it anyway' to keep it.", false);
             return;
         }
 
         auto t = *ch;
         t.chroma = heard;
         cal.chords.push_back (t);
-        statusText = ch->name + " learned.";
+        say ("OK: " + ch->name + " learned.", true);
         finishStep();
+    }
+
+    bool CalibrationSession::newAttack (const AnalysisFrame& f)
+    {
+        // Per input: a pick attack = the peak jumps well above what was ringing, or sound comes after a quiet moment.
+        // The first frame after Listen only learns what is ringing already.
+        const auto c = (size_t) f.channel;
+        const float gate = std::max (cal.noiseFloor * 6.0f, 0.003f);
+        if (f.rms < gate * 0.7f) quietSeen[c] = true;
+        const bool attack = f.peak > gate && (quietSeen[c] || (heardBefore[c] && f.peak > attackEnvelope[c] * 1.8f));
+        attackEnvelope[c] = std::max (f.peak, attackEnvelope[c] * 0.93f);
+        heardBefore[c] = true;
+        return attack;
     }
 
     void CalibrationSession::feed (const AnalysisFrame& f, double hop)
     {
-        if (current == Step::Done || needDecision || f.channel < 0 || f.channel >= inputs)
+        if (! listening || current == Step::Done || needDecision || f.channel < 0 || f.channel >= inputs)
             return;
 
         // --- Silence: learn the noise level of every input ---
@@ -757,17 +812,36 @@ namespace gl
                     cal.noiseFloor = std::max (cal.noiseFloor, p90);
                 }
                 cal.noiseFloor = std::max (cal.noiseFloor, 1e-4f);
-                statusText = "Noise level measured.";
+                say ("OK: noise level measured.", true);
                 finishStep();
             }
             return;
         }
 
-        // In mono mode only input 0 matters. In hex mode, sum the energy per input to find the string's channel.
+        // Nothing clear for a long time: stop, so the player can press Listen again when ready.
+        if (f.channel == 0) listenTime += hop;
+        if (listenTime > kListenTimeout && ! noteActive)
+        {
+            listening = false;
+            clearMeasurement();
+            say ("Nothing clear was heard. Press Listen and play again.", false);
+            return;
+        }
+
+        // In mono mode only input 0 matters.
+        if (! cal.hexMode && f.channel != 0)
+            return;
+
+        // A note still ringing from before does not count: wait for a new pick attack.
+        if (! armed)
+        {
+            if (! newAttack (f)) return;
+            armed = true;
+        }
+
+        // In hex mode, sum the energy per input to find the string's channel.
         if (cal.hexMode)
             channelEnergy[(size_t) f.channel] += f.rms;
-        else if (f.channel != 0)
-            return;
 
         if (current == Step::Chord)
         {
@@ -807,18 +881,11 @@ namespace gl
             }
 
             const double needed = everyNote ? kSpotSeconds : kPitchSeconds;
-            const double done = std::min (1.0, (double) pitches.size() * hop / needed);
-
-            if (everyNote)
+            progress = std::min (1.0, (double) pitches.size() * hop / needed);
+            if (progress >= 1.0)
             {
-                const int last = std::max (1, cal.lastFret[(size_t) currentString()] + 1);
-                progress = (fret + done) / last;
-                if (done >= 1.0) evaluateEveryNote();
-            }
-            else
-            {
-                progress = done;
-                if (done >= 1.0) evaluatePitch();
+                if (everyNote) evaluateEveryNote();
+                else           evaluatePitch();
             }
             return;
         }
@@ -844,6 +911,7 @@ namespace gl
             progress = (double) peaks.size() / kHitsNeeded;
             if ((int) peaks.size() >= kHitsNeeded && ! noteActive)
             {
+                listening = false;
                 const float level = median (peaks);
                 const int s = currentString();
                 if (current == Step::Soft)
@@ -851,7 +919,7 @@ namespace gl
                     softLevels.push_back (level);
                     cal.softPeak = median (softLevels);
                     if (full && s >= 0 && s < kMaxStrings) cal.stringSoft[(size_t) s] = level;
-                    statusText = "Soft picking measured.";
+                    say ("OK: soft picking measured.", true);
                 }
                 else
                 {
@@ -860,9 +928,11 @@ namespace gl
                     hardLevels.push_back (std::max (level, soft * 1.5f));
                     cal.hardPeak = std::max (median (hardLevels), cal.softPeak * 1.5f);
                     if (full && s >= 0 && s < kMaxStrings) cal.stringHard[(size_t) s] = std::max (level, soft * 1.5f);
-                    statusText = level < soft * 1.5f
-                        ? "Hard and soft sounded almost the same, so the velocity range will be small. You can run calibration again."
-                        : "Hard picking measured.";
+                    if (level < soft * 1.5f)
+                        say ("Hard and soft sounded almost the same, so the velocity range will be small. "
+                             "Press Back to try again.", false);
+                    else
+                        say ("OK: hard picking measured.", true);
                 }
                 finishStep();
             }

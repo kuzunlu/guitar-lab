@@ -671,12 +671,53 @@ namespace gl
         tabViewport.setScrollBarsShown (false, true);
         addAndMakeVisible (tabViewport);
 
+        memory.remember (writeToggle, "write");
+        memory.remember (stepBox, "step");
+        memory.remember (techniqueBox, "technique");
+        memory.remember (bendBox, "bend");
+        memory.remember (bendAmountBox, "bendAmount");
+        memory.remember (slideBox, "slide");
+        memory.remember (slideDistance, "slideDistance");
+        memory.remember (velocity, "velocity");
+        memory.remember (vibDepth, "vibratoDepth");
+        memory.remember (vibRate, "vibratoRate");
+        memory.remember (strumMs, "strumMs");
+        memory.remember (vibratoToggle, "vibrato");
+        memory.remember (letRingToggle, "letRing");
+        memory.remember (strumDownToggle, "strumDown");
+        memory.remember (countInToggle, "countIn");
+        memory.remember (snapBox, "snap");
+
+        // Cursor, selection, zoom and scroll position come back from the last time the window was open.
+        const auto& w = proc.work;
+        tab.cursor = juce::jlimit (0.0, proc.phrase.lengthBeats, w.phraseCursor);
+        for (int i : w.phraseSelection)
+            if (i >= 0 && i < (int) proc.phrase.notes.size()) tab.selection.push_back (i);
+        tab.selected = w.phraseSelected < (int) proc.phrase.notes.size() ? w.phraseSelected : -1;
+        zoom = w.phraseZoom;
+        autoFit = w.phraseAutoFit;
+        restoreViewX = w.phraseViewX;
+        updateLoopButton();
+        refresh();
+    }
+
+    void PhrasePanel::restoreUi()
+    {
+        memory.restoreAll();
         refresh();
     }
 
     PhrasePanel::~PhrasePanel()
     {
         proc.recordingGuitar = false;
+
+        auto& w = proc.work;
+        w.phraseCursor = tab.cursor;
+        w.phraseSelected = tab.selected;
+        w.phraseSelection = tab.selection;
+        w.phraseZoom = zoom;
+        w.phraseAutoFit = autoFit;
+        w.phraseViewX = tabViewport.getViewPositionX();
     }
 
     // -----------------------------------------------------------------------
@@ -1400,5 +1441,10 @@ namespace gl
 
         tabViewport.setBounds (r);
         refresh();
+        if (restoreViewX >= 0 && tabViewport.getWidth() > 0)
+        {
+            tabViewport.setViewPosition (restoreViewX, 0);
+            restoreViewX = -1;
+        }
     }
 }
