@@ -171,6 +171,10 @@ Keep `Theory/`, `Midi/` and `Tracking/` free of JUCE, so they stay testable and 
   **Unfinished calibration:** while the wizard is on its Running page, the project saves `calibrationDraft`
   (`CalibrationSession::saveDraft`: plan, step, tuning, levels, the calibration so far). Loading it opens the wizard
   at the same step; Back cannot go to steps from before the load (`backLimit`).
+- **Lighthouse tuner** (`UI/LighthouseTuner`, "Tuner..." on the Guitar -> MIDI tab): the processor copies the raw input
+  into `tunerRing` ONLY while `proc.tunerOn` is true (tuner open). The tuner runs its own YIN on every screen refresh
+  (`VBlankAttachment`) and smooths the cents; closed, it costs nothing. **Note log** (`NoteLogView`): every tracker
+  note-on/off goes through `trackedFifo` (`popTrackedEvents`), drained by `TrackerPanel::timerTick`.
 - **Every control needs a detailed tooltip.** First line = short title (shown bold), then plain-English lines
   that explain what it does and when to use it. Components that change by hover (fretboard, piano, tab view,
   chord cards) implement `getTooltip()` to describe what is under the mouse.

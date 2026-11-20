@@ -170,6 +170,13 @@ int GuitarLabProcessor::popTrackedEvents (TrackedEvent* dest, int maxEvents)
     return n;
 }
 
+void GuitarLabProcessor::readTunerInput (float* dest, int count) const
+{
+    const int w = tunerWrite.load();
+    for (int i = 0; i < count; ++i)
+        dest[i] = tunerRing[(size_t) ((w - count + i) & (kTunerRing - 1))];
+}
+
 int GuitarLabProcessor::popFrames (gl::AnalysisFrame* dest, int maxFrames)
 {
     const auto scope = frameFifo.read (std::min (maxFrames, frameFifo.getNumReady()));
@@ -448,6 +455,22 @@ void GuitarLabProcessor::processBlock (juce::AudioBuffer<float>& audio, juce::Mi
         inputCopy.copyFrom (c, 0, audio, c, 0, numCopied);
 
     audio.clear();
+
+    // Lighthouse tuner (only while it is open): the chosen input, or all inputs mixed.
+    if (tunerOn.load() && numIn > 0)
+    {
+        const int chosen = (int) params.getRawParameterValue (ParamIDs::trackInput)->load() - 1; // -1 = mix
+        int w = tunerWrite.load();
+        for (int i = 0; i < numCopied; ++i)
+        {
+            float v = 0.0f;
+            if (chosen >= 0 && chosen < numIn) v = inputCopy.getSample (chosen, i);
+            else { for (int c = 0; c < numIn; ++c) v += inputCopy.getSample (c, i); v /= (float) numIn; }
+            tunerRing[(size_t) (w & (kTunerRing - 1))] = v;
+            ++w;
+        }
+        tunerWrite.store (w & 0x3fffffff);
+    }
 
     // --- Where are we in time? ---
     const bool sync = params.getRawParameterValue (ParamIDs::syncToHost)->load() > 0.5f;

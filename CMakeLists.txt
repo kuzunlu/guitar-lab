@@ -97,6 +97,7 @@ target_sources(GuitarLab PRIVATE
     Source/UI/TrackerPanel.cpp
     Source/UI/ShapesPanel.cpp
     Source/UI/IntonationView.cpp
+    Source/UI/LighthouseTuner.cpp
 )
 
 target_compile_definitions(GuitarLab PUBLIC

@@ -4,6 +4,7 @@
 #include "Tracking/Calibration.h"
 #include "UI/FretboardComponent.h"
 #include "UI/IntonationView.h"
+#include "UI/LighthouseTuner.h"
 #include "UI/Theme.h"
 #include "UI/UiMemory.h"
 
@@ -149,8 +150,9 @@ namespace gl
         juce::Slider safety, sensitivity, hysteresis;
         juce::ToggleButton bendsToggle { "Track bends / slides / vibrato" }, monitorToggle { "Hear guitar" },
                            soundToggle { "Built-in sound" };
-        juce::TextButton calibrateButton { "Calibrate..." }, intonationButton { "Intonation..." };
+        juce::TextButton calibrateButton { "Calibrate..." }, intonationButton { "Intonation..." }, tunerButton { "Tuner..." };
         IntonationView intonation;
+        LighthouseTuner lighthouse { proc };
 
         TunerView tuner;
         NoteLogView noteLog;

@@ -189,6 +189,10 @@ public:
         uint8_t status = 0, data1 = 0, data2 = 0;
     };
     int popTrackedEvents (TrackedEvent* dest, int maxEvents); // message thread
+
+    // --- Lighthouse tuner: the raw guitar input, copied only while the tuner is open ---
+    std::atomic<bool> tunerOn { false };
+    void readTunerInput (float* dest, int count) const; // the newest `count` samples (count <= 16384), message thread
     juce::int64 samplesSoFar() const { return samplesProcessed.load(); }
     int    popRecordEvents (RecordEvent* dest, int maxEvents); // message thread
     double currentBpm() const { return renderBpm(); }
@@ -264,6 +268,9 @@ private:
     juce::AbstractFifo trackedFifo { 4096 };
     std::vector<TrackedEvent> trackedStore = std::vector<TrackedEvent> (4096);
     std::atomic<juce::int64> samplesProcessed { 0 };
+    static constexpr int kTunerRing = 1 << 15;
+    std::vector<float> tunerRing = std::vector<float> ((size_t) kTunerRing);
+    std::atomic<int> tunerWrite { 0 };
     bool   recordUsesTransport = false;
     double recordClock = 0.0;
 

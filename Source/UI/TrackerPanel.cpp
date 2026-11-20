@@ -767,6 +767,14 @@ namespace gl
         addAndMakeVisible (intonationButton);
         addChildComponent (intonation);
 
+        tunerButton.setTooltip ("Lighthouse tuner\nA big, smooth strobe tuner. Play one string: the lighthouse beam and the "
+                                "strobe bands turn while the string is out of tune (clockwise / to the right = sharp) and "
+                                "stand still when it is in tune. The nearest string of your tuning lights up.\n"
+                                "It only works while it is open, so it costs nothing the rest of the time. Esc closes it.");
+        tunerButton.onClick = [this] { lighthouse.open(); };
+        addAndMakeVisible (tunerButton);
+        addChildComponent (lighthouse);
+
         // --- Calibration presets ---
         presetLabel.setText ("Saved calibrations", juce::dontSendNotification);
         presetLabel.setJustificationType (juce::Justification::centredRight);
@@ -1110,6 +1118,7 @@ namespace gl
         put (b, hystLabel, 74);     put (b, hysteresis, 150);
         put (b, calibrateButton, 110);
         put (b, intonationButton, 100);
+        put (b, tunerButton, 80);
         calStatus.setBounds (b);
 
         auto c = row();
@@ -1126,5 +1135,6 @@ namespace gl
         tuner.setBounds (r);
         wizard.setBounds (getLocalBounds().reduced (20, 10));
         intonation.setBounds (getLocalBounds().reduced (10));
+        lighthouse.setBounds (getLocalBounds().reduced (6));
     }
 }
