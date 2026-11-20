@@ -718,6 +718,23 @@ namespace gl
         addAndMakeVisible (hysteresis);
         hystAtt = std::make_unique<APVTS::SliderAttachment> (proc.params, ParamIDs::trackHysteresis, hysteresis);
 
+        label (styleLabel, "Playing style", "Playing style\n"
+            "Sets Speed / safety, Sensitivity and Hysteresis together for the way you play:\n"
+            "  - Balanced: the normal settings.\n"
+            "  - Lead / single notes: the fewest wrong extra notes (a single note is not heard as a chord).\n"
+            "  - Rhythm / chords: fewer short 'blip' notes in strums, keeps most quiet octave notes.\n"
+            "  - Arpeggios / fingerpicking: also hears quieter notes; notes over ringing strings still start.\n"
+            "Change any knob afterwards and this shows 'Custom'.");
+        styleBox.addItem ("Custom", 1);
+        styleBox.addItem ("Balanced (default)", 2);
+        styleBox.addItem ("Lead / single notes", 3);
+        styleBox.addItem ("Rhythm / chords", 4);
+        styleBox.addItem ("Arpeggios / fingerpicking", 5);
+        styleBox.setItemEnabled (1, false); // shown, not chosen
+        styleBox.setTooltip (styleLabel.getTooltip());
+        styleBox.onChange = [this] { applyStyle (styleBox.getSelectedId()); };
+        addAndMakeVisible (styleBox);
+
         bendsToggle.setTooltip ("Track bends, slides and vibrato\n"
             "On: small pitch changes while a note rings are sent as pitch bend on that string's channel "
             "(within the pitch bend range from MIDI settings). Bigger jumps start a new legato note.\n"
@@ -955,6 +972,41 @@ namespace gl
         refreshPresets();
     }
 
+    namespace
+    {
+        struct Style { int id; float safety, sensitivity, hysteresis; };
+        constexpr Style kStyles[] = { { 2, 3.0f, 1.0f, 0.0f }, { 3, 3.0f, 1.0f, 1.0f }, { 4, 4.0f, 1.0f, 0.5f }, { 5, 3.0f, 1.2f, 0.5f } };
+    }
+
+    void TrackerPanel::applyStyle (int id)
+    {
+        for (const auto& st : kStyles)
+        {
+            if (st.id != id) continue;
+            const std::pair<const char*, float> values[] = { { ParamIDs::trackStability, st.safety },
+                                                             { ParamIDs::trackSensitivity, st.sensitivity },
+                                                             { ParamIDs::trackHysteresis, st.hysteresis } };
+            for (const auto& [paramId, v] : values)
+                if (auto* p = proc.params.getParameter (paramId))
+                {
+                    p->beginChangeGesture();
+                    p->setValueNotifyingHost (p->convertTo0to1 (v));
+                    p->endChangeGesture();
+                }
+        }
+    }
+
+    int TrackerPanel::matchingStyle() const
+    {
+        const float safety = proc.params.getRawParameterValue (ParamIDs::trackStability)->load();
+        const float sens = proc.params.getRawParameterValue (ParamIDs::trackSensitivity)->load();
+        const float hyst = proc.params.getRawParameterValue (ParamIDs::trackHysteresis)->load();
+        for (const auto& st : kStyles)
+            if (std::abs (safety - st.safety) < 0.01f && std::abs (sens - st.sensitivity) < 0.015f && std::abs (hyst - st.hysteresis) < 0.015f)
+                return st.id;
+        return 1;
+    }
+
     void TrackerPanel::restoreUi()
     {
         wizard.restoreUi();
@@ -1028,6 +1080,10 @@ namespace gl
         }
         for (int c = 0; c < kMaxStrings; ++c)
             if (! fresh[(size_t) c]) last[(size_t) c].rms *= 0.8f;
+
+        // The playing style box follows the knobs.
+        if (const int style = matchingStyle(); styleBox.getSelectedId() != style)
+            styleBox.setSelectedId (style, juce::dontSendNotification);
 
         // Notes the tracker sent: into the note log (string from the MIDI channel).
         noteLog.rate = proc.getSampleRate() > 0.0 ? proc.getSampleRate() : 48000.0;
@@ -1125,6 +1181,8 @@ namespace gl
         put (c, presetLabel, 130);       put (c, presetBox, 260);
         put (c, deletePresetButton, 70); c.removeFromLeft (16);
         put (c, presetName, 200);        put (c, savePresetButton, 120);
+        c.removeFromLeft (16);
+        put (c, styleLabel, 90);         put (c, styleBox, 210);
 
         warning.setBounds (row (20));
         help.setBounds (row (20));

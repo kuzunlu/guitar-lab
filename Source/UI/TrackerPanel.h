@@ -140,6 +140,10 @@ namespace gl
 
         juce::Label modeLabel, inputLabel, safetyLabel, sensLabel, hystLabel, calStatus, warning, help, presetLabel;
         juce::ComboBox presetBox;
+        juce::Label styleLabel;
+        juce::ComboBox styleBox;                // playing style: sets safety, sensitivity and hysteresis together
+        void applyStyle (int id);
+        int  matchingStyle() const;             // the style the knobs are set to now (1 = Custom)
         juce::TextEditor presetName;
         juce::TextButton savePresetButton { "Save as preset" }, deletePresetButton { "Delete" };
         juce::Array<juce::File> presetFiles;
