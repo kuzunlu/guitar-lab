@@ -646,6 +646,8 @@ void GuitarLabProcessor::getStateInformation (juce::MemoryBlock& destData)
     extra.setProperty ("keyswitchChannel", midiSettings.keyswitchChannel, nullptr);
     extra.setProperty ("palmMuteCC", midiSettings.palmMuteCC, nullptr);
     extra.setProperty ("calibration", juce::String (calibration.serialise()), nullptr);
+    if (work.calOpen && work.calPage == 1) // a calibration in progress (wizard page "Running"): go on with it later
+        extra.setProperty ("calibrationDraft", juce::String (work.calSession.saveDraft()), nullptr);
     extra.appendChild (uiState.createCopy(), nullptr);
 
     state.removeChild (state.getChildWithName ("GuitarLabData"), nullptr);
@@ -689,6 +691,12 @@ void GuitarLabProcessor::setStateInformation (const void* data, int sizeInBytes)
         midiSettings.keyswitchChannel = extra.getProperty ("keyswitchChannel", 0);
         midiSettings.palmMuteCC       = extra.getProperty ("palmMuteCC", -1);
         calibration.deserialise (extra.getProperty ("calibration").toString().toStdString());
+        if (extra.hasProperty ("calibrationDraft")
+            && work.calSession.loadDraft (extra.getProperty ("calibrationDraft").toString().toStdString()))
+        {
+            work.calOpen = true;
+            work.calPage = 1; // the wizard opens at the same step
+        }
 
         // Copied into the same tree object: the panels look their part up again when the state is loaded.
         const auto ui = extra.getChildWithName ("UiState");

@@ -92,7 +92,7 @@ namespace gl
         ~TrackerPanel() override;
 
         void refresh();      // instrument or calibration changed
-        void restoreUi() { wizard.restoreUi(); } // after a project was loaded
+        void restoreUi();    // after a project was loaded (it may hold an unfinished calibration)
         void timerTick();    // ~30 times a second
 
         // Fretboard marks while calibrating (what to play next).

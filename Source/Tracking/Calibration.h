@@ -138,7 +138,12 @@ namespace gl
         void skip();     // skip this item (keeps default values)
         void noMoreFrets(); // "every note": this guitar has no more frets (applies to all strings)
         bool canEndFrets() const { return current == Step::EveryNote; }
-        bool canGoBack() const     { return stepIndex > 0; }
+        bool canGoBack() const     { return stepIndex > backLimit; }
+
+        // An unfinished calibration as text, saved with the project so it can go on after the DAW or app closed.
+        // loadDraft goes on at the same item (Ready); Back cannot go to items from before the save.
+        std::string saveDraft() const;
+        bool loadDraft (const std::string& text); // false (and nothing changes) when the text is not a draft
 
         Phase phase() const;
         Step step() const          { return current; }
@@ -193,6 +198,7 @@ namespace gl
         std::vector<PlanItem> plan;
         std::vector<Snapshot> history;   // history[i] = state before plan item i
         int stepIndex = 0;
+        int backLimit = 0;               // back() stops here (the item a draft was loaded at)
         Step current = Step::Silence;
         int inputs = 1;
 

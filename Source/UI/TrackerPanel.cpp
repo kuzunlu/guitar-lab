@@ -851,6 +851,16 @@ namespace gl
         refreshPresets();
     }
 
+    void TrackerPanel::restoreUi()
+    {
+        wizard.restoreUi();
+        if (proc.work.calOpen && ! wizard.isVisible())
+        {
+            wizard.setVisible (true);
+            wizard.resume();
+        }
+    }
+
     void TrackerPanel::refresh()
     {
         updateStatus();

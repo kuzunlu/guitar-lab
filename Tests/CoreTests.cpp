@@ -1192,6 +1192,43 @@ static void testFullCalibration()
            "attack fingerprints survive save/load");
 }
 
+static void testCalibrationDraft()
+{
+    // An unfinished Full calibration is saved as a draft and goes on after loading, at the same step.
+    Instrument g;
+    g.setTuning ({ 62, 57, 53, 48, 43, 38 }); // D standard: the draft must bring its own tuning
+    CalibrationSession cs;
+    cs.start (g, false, 1, true);
+    const double hop = 0.005;
+    cs.listen();
+    for (int i = 0; i < 700 && cs.step() == CalibrationSession::Step::Silence; ++i)
+        cs.feed ({ 0, 0.0f, 0.0f, 0.0005f, 0.001f }, hop);
+    auto playFret = [&] (CalibrationSession& s)
+    {
+        AnalysisFrame f { 0, (float) midiToHz (s.expectedNote()), 0.97f, 0.1f, 0.3f };
+        f.hasFeatures = true;
+        s.listen();
+        for (int i = 0; i < 3; ++i) s.feed ({ 0, 0.0f, 0.0f, 0.0004f, 0.0005f }, hop);
+        for (int i = 0; i < 200 && s.isListening(); ++i) s.feed (f, hop);
+        for (int i = 0; i < 3; ++i) s.feed ({ 0, 0.0f, 0.0f, 0.0004f, 0.0005f }, hop);
+    };
+    for (int k = 0; k < 3; ++k) playFret (cs);
+    checkEq (cs.expectedFret(), 3, "draft: three frets of the low string done");
+
+    CalibrationSession back;
+    check (! back.loadDraft ("not a draft"), "draft: other text is refused");
+    check (back.loadDraft (cs.saveDraft()), "draft: loads");
+    checkEq (back.stepNumber(), cs.stepNumber(), "draft: same step");
+    checkEq (back.totalSteps(), cs.totalSteps(), "draft: same plan");
+    checkEq (back.expectedNote(), cs.expectedNote(), "draft: same note to play (its own tuning)");
+    check (back.result().positions[5][2].measured && ! back.result().valid, "draft: measured frets kept, not finished");
+    check (std::abs (back.result().noiseFloor - cs.result().noiseFloor) < 1.0e-6f, "draft: noise level kept");
+    check (! back.canGoBack(), "draft: Back cannot go before the loaded step");
+    playFret (back);
+    checkEq (back.expectedFret(), 4, "draft: goes on with the next fret");
+    check (back.canGoBack(), "draft: Back works for steps after loading");
+}
+
 static void testTimbreString()
 {
     Instrument g;
@@ -1726,6 +1763,7 @@ int main()
     testRecorder();
     testSpectrum();
     testFullCalibration();
+    testCalibrationDraft();
     testTimbreString();
     testChordTracking();
     testPitchDetector();

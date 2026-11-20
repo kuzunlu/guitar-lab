@@ -357,11 +357,108 @@ namespace gl
         }
         plan.push_back ({ Step::Done, -1 });
 
-        stepIndex = 0;
+        stepIndex = backLimit = 0;
         spotLevels.clear();
         history.clear();
         say ({}, true);
         beginStep();
+    }
+
+    std::string CalibrationSession::saveDraft() const
+    {
+        std::ostringstream out;
+        out << "GLDRAFT 1 " << (int) full << ' ' << (int) cal.hexMode << ' ' << inputs << ' ' << stepIndex << ' '
+            << inst.numStrings();
+        for (int n : inst.tuning()) out << ' ' << n;
+        out << '\n';
+        for (const auto& item : plan)
+            out << "Q " << (int) item.step << ' ' << item.string << ' ' << item.fret << '\n';
+        auto values = [&out] (const char* tag, const std::vector<float>& v)
+        {
+            out << tag << ' ' << v.size();
+            for (float x : v) out << ' ' << x;
+            out << '\n';
+        };
+        values ("L", spotLevels);
+        values ("SL", softLevels);
+        values ("HL", hardLevels);
+        out << "BL";
+        for (int s = 0; s < kMaxStrings; ++s) out << ' ' << bleedSum[(size_t) s] << ' ' << bleedCount[(size_t) s];
+        out << "\nCAL\n" << cal.serialise();
+        return out.str();
+    }
+
+    bool CalibrationSession::loadDraft (const std::string& text)
+    {
+        std::istringstream in (text);
+        std::string line, tag;
+        int version = 0, isFull = 0, hex = 0, numIn = 1, index = 0, count = 0;
+        if (! std::getline (in, line)) return false;
+        std::istringstream head (line);
+        head >> tag >> version >> isFull >> hex >> numIn >> index >> count;
+        if (! head || tag != "GLDRAFT" || version != 1 || count < 1 || count > kMaxStrings) return false;
+        std::vector<MidiNote> tuning ((size_t) count);
+        for (auto& n : tuning) head >> n;
+        Instrument loaded;
+        if (! head || ! loaded.setTuning (tuning)) return false;
+
+        std::vector<PlanItem> items;
+        std::vector<float> spots, soft, hard;
+        std::array<double, kMaxStrings> bSum {};
+        std::array<int, kMaxStrings> bCount {};
+        std::string calText;
+        auto readValues = [] (std::istringstream& ls, std::vector<float>& v)
+        {
+            size_t n = 0;
+            ls >> n;
+            v.assign (std::min<size_t> (n, 10000), 0.0f);
+            for (auto& x : v) ls >> x;
+        };
+        while (std::getline (in, line))
+        {
+            if (line == "CAL")
+            {
+                std::ostringstream rest;
+                rest << in.rdbuf();
+                calText = rest.str();
+                break;
+            }
+            std::istringstream ls (line);
+            ls >> tag;
+            if (tag == "Q")
+            {
+                int st = 0, s = -1, f = 0;
+                ls >> st >> s >> f;
+                if (ls && st >= 0 && st <= (int) Step::Done) items.push_back ({ (Step) st, s, f });
+            }
+            else if (tag == "L")  readValues (ls, spots);
+            else if (tag == "SL") readValues (ls, soft);
+            else if (tag == "HL") readValues (ls, hard);
+            else if (tag == "BL") for (int s = 0; s < kMaxStrings; ++s) ls >> bSum[(size_t) s] >> bCount[(size_t) s];
+        }
+        if (items.empty() || items.back().step != Step::Done || index < 0 || index >= (int) items.size() || calText.empty())
+            return false;
+
+        inst = loaded;
+        cal.deserialise (calText);
+        cal.valid = false;
+        cal.hexMode = hex != 0;
+        cal.tuning = inst.tuning();
+        inputs = std::clamp (numIn, 1, kMaxStrings);
+        full = isFull != 0;
+        plan = items;
+        spotLevels = spots;
+        softLevels = soft;
+        hardLevels = hard;
+        bleedSum = bSum;
+        bleedCount = bCount;
+        chordList = full && ! cal.hexMode ? chordShapesFor (inst) : std::vector<ChordTemplate> {};
+        previousNote = -1;
+        history.clear();
+        stepIndex = backLimit = index;
+        beginStep();
+        say ("Welcome back: the calibration goes on where you stopped. Press Listen and play.", true);
+        return true;
     }
 
     int CalibrationSession::currentString() const
@@ -526,7 +623,7 @@ namespace gl
 
     void CalibrationSession::back()
     {
-        if (stepIndex == 0) return;
+        if (stepIndex <= backLimit) return;
         --stepIndex;
         const auto h = history[(size_t) stepIndex];
         cal = h.cal;

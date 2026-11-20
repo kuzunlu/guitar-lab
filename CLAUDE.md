@@ -168,6 +168,9 @@ Keep `Theory/`, `Midi/` and `Tracking/` free of JUCE, so they stay testable and 
   after a step is Ready; never in Decide, and "Stop listening" pauses it until the next step.
   **Sound cues** (`proc.playCue`, audio output only): tick = listening started, ding-ding = OK, low tone = problem.
   The wizard finds them by comparing phase and step number with the last tick (`playCues`).
+  **Unfinished calibration:** while the wizard is on its Running page, the project saves `calibrationDraft`
+  (`CalibrationSession::saveDraft`: plan, step, tuning, levels, the calibration so far). Loading it opens the wizard
+  at the same step; Back cannot go to steps from before the load (`backLimit`).
 - **Every control needs a detailed tooltip.** First line = short title (shown bold), then plain-English lines
   that explain what it does and when to use it. Components that change by hover (fretboard, piano, tab view,
   chord cards) implement `getTooltip()` to describe what is under the mouse.
