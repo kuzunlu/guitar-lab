@@ -160,6 +160,7 @@ void GuitarLabEditor::reloadAll()
     reharmPanel.restoreUi();
     trainerPanel.restoreUi();
     phrasePanel.restoreUi();
+    trackerPanel.restoreUi();
     tabs.setCurrentTabIndex (juce::jlimit (0, tabs.getNumTabs() - 1, (int) proc.uiState.getProperty ("tab", (int) TrackerTab)));
     instrumentBar.refresh();
     reharmPanel.refresh();

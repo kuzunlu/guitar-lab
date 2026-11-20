@@ -1103,6 +1103,8 @@ static void testFullCalibration()
         AnalysisFrame f { 0, (float) midiToHz (note), 0.97f, 0.1f, 0.3f };
         f.hasFeatures = true;
         f.timbre.fill (-0.5f * (float) s);
+        f.hasOvertones = true; // the tracker sends the attack's overtones while calibrating
+        for (int k = 0; k < kOvertones; ++k) f.overtones[(size_t) k] = -0.3f * (float) k - 0.1f * (float) s;
 
         listen();
         for (int i = 0; i < 200; ++i)
@@ -1181,6 +1183,13 @@ static void testFullCalibration()
     copy.deserialise (cs.result().serialise());
     check (copy.positions[5][7].measured && copy.chords.size() == cs.result().chords.size() && copy.lastFret[3] == 22
            && copy.stringSoft[0] == cs.result().stringSoft[0], "full calibration survives save/load");
+
+    // Poly's attack fingerprints: measured at every fret, and kept through save/load.
+    const auto& spot = cs.result().positions[5][7];
+    check (spot.hasAttack, "full calibration: low E fret 7 has an attack fingerprint");
+    check (copy.positions[5][7].hasAttack && std::abs (copy.positions[5][7].attack[0] - spot.attack[0]) < 1.0e-3f
+           && std::abs (copy.positions[5][7].attack[kOvertones - 1] - spot.attack[kOvertones - 1]) < 1.0e-3f,
+           "attack fingerprints survive save/load");
 }
 
 static void testTimbreString()
@@ -1351,11 +1360,12 @@ namespace
         return cal;
     }
 
-    std::vector<Captured> runPoly (const std::vector<float>& audio, const Instrument& g = Instrument())
+    std::vector<Captured> runPoly (const std::vector<float>& audio, const Instrument& g = Instrument(), double hysteresis = 0.0)
     {
         TrackerSettings s;
         s.mode = TrackMode::Poly;
         s.monoInput = 0;
+        s.hysteresis = hysteresis;
         GuitarTracker t;
         t.prepare (kRate, 512, g, polyTestCalibration(), s);
         return runTracker (t, audio);
@@ -1491,6 +1501,27 @@ static void testPolyTracking()
         }
         std::printf ("  poly latency: %s\n", all.c_str());
         check (worst < 0.08, "poly: single notes start within 80 ms (worst " + std::to_string ((int) (worst * 1000)) + " ms)");
+    }
+
+    // Hysteresis: new notes need more energy while louder notes ring. A single note, a ringing arpeggio and an
+    // open chord must still come out complete with it turned up.
+    for (double h : { 0.5, 1.0 })
+    {
+        const std::string tag = "poly, hysteresis " + std::to_string (h).substr (0, 3) + ": ";
+        auto single = ksString (45, 1.0);
+        append (single, silenceOf (0.4));
+        checkEq (listOf (pitchesStarted (runPoly (single, Instrument(), h))), listOf ({ 45 }), tag + "single A2 gives one note A2");
+
+        const std::vector<int> arp { 45, 52, 57, 60, 64 };
+        std::vector<float> audio;
+        for (size_t i = 0; i < arp.size(); ++i)
+            mixAt (audio, ksString (arp[i], 1.4 - i * 0.15, 0.25, (unsigned) (i + 11)), i * 0.15);
+        const auto got = listOf (pitchesStarted (runPoly (audio, Instrument(), h)));
+        check (got == listOf (arp), tag + "arpeggio, every note and nothing else (got " + got + ")");
+
+        auto chord = strum ({ 48, 52, 55, 60, 64 }, 1.5);
+        append (chord, silenceOf (0.3));
+        checkEq (listOf (pitchesStarted (runPoly (chord, Instrument(), h))), listOf ({ 48, 52, 55, 60, 64 }), tag + "C major complete");
     }
 
     // Same note picked twice = two notes.

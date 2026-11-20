@@ -27,6 +27,8 @@ namespace gl
         float  level = 0.0f;   // typical pluck peak here (dead spots are quieter)
         Timbre timbre {};      // tone colour here (for guessing the string in mono mode)
         bool   hasTimbre = false;
+        Overtones attack {};   // harmonics 2..16 at the pick attack (Poly's fingerprint for this string and fret)
+        bool   hasAttack = false;
     };
 
     // A chord the player taught the tracker (mono mode): the shape and its sound fingerprint.
@@ -102,6 +104,8 @@ namespace gl
         bool   hasFeatures = false;
         Timbre timbre {};
         Chroma chroma {};
+        bool   hasOvertones = false;   // calibrating, normal guitar: every 2nd hop, for the attack fingerprints
+        Overtones overtones {};
     };
 
     // Walks the player through calibration, one thing to play at a time (an "item": silence, one string, one fret,
@@ -217,6 +221,7 @@ namespace gl
         int  fret = 0;                    // "every note": fret being measured
         int  previousNote = -1;           // ignore the last note while it still rings
         std::vector<Timbre> timbres;
+        std::vector<Overtones> attacks;  // "every note": overtones heard 40-70 ms after the pick attack
         std::array<double, kMaxStrings> bleedSum {};
         std::array<int, kMaxStrings> bleedCount {};
         std::vector<float> spotLevels;    // all measured pluck levels, for typicalLevel

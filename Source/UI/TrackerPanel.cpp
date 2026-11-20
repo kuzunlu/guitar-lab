@@ -168,10 +168,28 @@ namespace gl
                                  "In a DAW the Space bar may start the DAW instead: then click this button.");
         listenButton.onClick = [this]
         {
-            if (session.isListening()) session.stop();
-            else session.listen();
+            if (session.isListening()) { session.stop(); autoPausedStep = session.stepNumber(); }
+            else                       { session.listen(); autoPausedStep = -1; }
             tick();
         };
+
+        autoToggle.setTooltip ("Auto listen\nPresses Listen for you. When a step is ready, Guitar Lab waits the time on the "
+                               "right, then starts listening by itself. So both hands can stay on the guitar for the whole "
+                               "calibration: play, wait for OK, wait for the next step, play.\n"
+                               "It never decides for you: after a problem ('Again' / 'Use it anyway') you still choose. "
+                               "'Stop listening' pauses it until the next step.");
+        autoToggle.setWantsKeyboardFocus (false);
+        autoDelay.setSliderStyle (juce::Slider::LinearHorizontal);
+        autoDelay.setTextBoxStyle (juce::Slider::TextBoxRight, false, 52, 20);
+        autoDelay.setRange (0.5, 10.0, 0.5);
+        autoDelay.setValue (2.0, juce::dontSendNotification);
+        autoDelay.setTextValueSuffix (" s");
+        autoDelay.setWantsKeyboardFocus (false);
+        autoDelay.setTooltip ("Auto listen delay\nHow long Guitar Lab waits after a step is ready before it starts "
+                              "listening by itself (with 'Auto listen' on). Give yourself time to move your hand to the "
+                              "next fret or chord: 1-2 s for the frets, 3-4 s for the chords.");
+        memory.remember (autoToggle, "autoListen");
+        memory.remember (autoDelay, "autoDelay");
 
         backButton.setTooltip ("Back\nGo back one step, for example when you played the wrong thing and it was still accepted. "
                                "The result of that step is forgotten; press Listen and play it again. Press Back more times "
@@ -200,6 +218,8 @@ namespace gl
         for (auto* b : { &startButton, &fullButton, &endFretsButton, &cancelButton, &listenButton, &backButton, &acceptButton,
                          &skipButton, &saveButton, &discardButton })
             addChildComponent (b);
+        addChildComponent (autoToggle);
+        addChildComponent (autoDelay);
         setWantsKeyboardFocus (true);
     }
 
@@ -279,6 +299,8 @@ namespace gl
         skipButton.setVisible (running);
         saveButton.setVisible (done);
         discardButton.setVisible (done);
+        autoToggle.setVisible (! done);
+        autoDelay.setVisible (! done);
         body.setVisible (! running);
         instruction.setVisible (running);
         status.setVisible (running);
@@ -405,11 +427,23 @@ namespace gl
             case Page::Running:
             {
                 using Phase = CalibrationSession::Phase;
+
+                // Auto listen: press Listen by itself a moment after a step is ready.
+                juce::String waiting ("   -   press Listen (or Space), then play");
+                if (session.phase() == Phase::Ready && autoToggle.getToggleState() && autoPausedStep != session.stepNumber())
+                {
+                    const auto now = juce::Time::getMillisecondCounter();
+                    if (readySince == 0) readySince = now;
+                    const double left = autoDelay.getValue() - (now - readySince) / 1000.0;
+                    if (left <= 0.0) session.listen();
+                    else waiting = "   -   listening starts by itself in " + juce::String (left, 1) + " s";
+                }
+                if (session.phase() != Phase::Ready) readySince = 0;
+
                 const auto phase = session.phase();
                 title.setText ("Calibration", juce::dontSendNotification);
                 stepLabel.setText ("Step " + juce::String (session.stepNumber()) + " of " + juce::String (session.totalSteps())
-                                   + (phase == Phase::Listening ? juce::String ("   -   listening: play now")
-                                                                : juce::String ("   -   press Listen (or Space), then play")),
+                                   + (phase == Phase::Listening ? juce::String ("   -   listening: play now") : waiting),
                                    juce::dontSendNotification);
                 instruction.setText (juce::String (session.instruction()), juce::dontSendNotification);
                 status.setText (juce::String (session.status()), juce::dontSendNotification);
@@ -461,7 +495,10 @@ namespace gl
     void CalibrationWizard::resized()
     {
         auto r = getLocalBounds().reduced (14);
-        title.setBounds (r.removeFromTop (30));
+        auto top = r.removeFromTop (30);
+        autoDelay.setBounds (top.removeFromRight (170).reduced (0, 4));
+        autoToggle.setBounds (top.removeFromRight (110));
+        title.setBounds (top);
 
         auto buttons = r.removeFromBottom (30);
         for (auto* b : { &startButton, &fullButton, &listenButton, &acceptButton, &backButton, &skipButton, &endFretsButton,
@@ -545,6 +582,19 @@ namespace gl
         sensitivity.setTooltip (sensLabel.getTooltip());
         addAndMakeVisible (sensitivity);
         sensAtt = std::make_unique<APVTS::SliderAttachment> (proc.params, ParamIDs::trackSensitivity, sensitivity);
+
+        label (hystLabel, "Hysteresis", "Hysteresis (poly mode)\n"
+            "Stops a single note from being heard as a chord. Every guitar note also sounds an octave, an octave + 5th, "
+            "two octaves... higher (its overtones). With this turned up, a note on one of those spots must be clearly "
+            "stronger before it starts, but only right after you picked the louder note below it.\n"
+            "0 = off (the normal behaviour). 1 = strongest: about a third fewer wrong extra notes, but a quiet real "
+            "octave strummed together with its lower note may be missed.\n"
+            "Arpeggios over ringing strings are not affected, and it never adds delay. Mono and hex modes ignore it.");
+        hysteresis.setSliderStyle (juce::Slider::LinearHorizontal);
+        hysteresis.setTextBoxStyle (juce::Slider::TextBoxRight, false, 40, 20);
+        hysteresis.setTooltip (hystLabel.getTooltip());
+        addAndMakeVisible (hysteresis);
+        hystAtt = std::make_unique<APVTS::SliderAttachment> (proc.params, ParamIDs::trackHysteresis, hysteresis);
 
         bendsToggle.setTooltip ("Track bends, slides and vibrato\n"
             "On: small pitch changes while a note rings are sent as pitch bend on that string's channel "
@@ -908,6 +958,7 @@ namespace gl
         put (b, bendsToggle, 230);
         put (b, monitorToggle, 110);
         put (b, soundToggle, 130);
+        put (b, hystLabel, 74);     put (b, hysteresis, 150);
         put (b, calibrateButton, 110);
         put (b, intonationButton, 100);
         calStatus.setBounds (b);

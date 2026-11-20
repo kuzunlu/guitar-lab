@@ -31,7 +31,7 @@ const std::vector<const char*>& GuitarLabProcessor::listenedParams()
         ParamIDs::bendRange, ParamIDs::firstChannel, ParamIDs::sendMpe, ParamIDs::syncToHost,
         ParamIDs::internalBpm, ParamIDs::legatoOverlap, ParamIDs::legatoVelocity,
         ParamIDs::trackMode, ParamIDs::trackInput, ParamIDs::trackStability,
-        ParamIDs::trackSensitivity, ParamIDs::trackBends };
+        ParamIDs::trackSensitivity, ParamIDs::trackBends, ParamIDs::trackHysteresis };
     return ids;
 }
 
@@ -83,6 +83,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout GuitarLabProcessor::createLa
     layout.add (std::make_unique<AudioParameterBool>   (ParameterID { ParamIDs::trackBends, 1 },    "Track bends", true));
     layout.add (std::make_unique<AudioParameterBool>   (ParameterID { ParamIDs::trackMonitor, 1 },  "Hear guitar", false));
     layout.add (std::make_unique<AudioParameterBool>   (ParameterID { ParamIDs::metronome, 1 },     "Metronome", false));
+    layout.add (std::make_unique<AudioParameterFloat>  (ParameterID { ParamIDs::trackHysteresis, 1 }, "Tracking hysteresis",
+                    NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.0f));
     return layout;
 }
 
@@ -123,6 +125,7 @@ void GuitarLabProcessor::rebuildTracker()
     ts.stableFrames = (int) params.getRawParameterValue (ParamIDs::trackStability)->load();
     ts.sensitivity  = params.getRawParameterValue (ParamIDs::trackSensitivity)->load();
     ts.trackBends   = params.getRawParameterValue (ParamIDs::trackBends)->load() > 0.5f;
+    ts.hysteresis   = params.getRawParameterValue (ParamIDs::trackHysteresis)->load();
     ts.bendRange    = midiSettings.bendRange;
     ts.firstChannel = midiSettings.firstChannel;
     ts.features     = calibrating.load(); // tone colour + chord fingerprints, only needed by the wizard

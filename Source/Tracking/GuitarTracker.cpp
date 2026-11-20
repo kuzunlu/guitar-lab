@@ -22,7 +22,8 @@ namespace gl
 
         if (settings.mode == TrackMode::Poly)
             poly.prepare (sampleRate, inst, cal, { settings.stableFrames, settings.sensitivity, settings.trackBends,
-                                                   settings.bendRange, settings.firstChannel });
+                                                   settings.bendRange, settings.firstChannel,
+                                                   std::clamp (settings.hysteresis, 0.0, 1.0) });
 
         if (settings.mode != TrackMode::Hex)
         {
@@ -53,6 +54,11 @@ namespace gl
         {
             v.timbreSpec.prepare (2048);
             v.chromaSpec.prepare (PitchDetector::kHistory);
+            // Attack fingerprints: about the first 46 ms of a note (power of two for the FFT).
+            int attackSize = 256;
+            while (attackSize * 2 <= v.detector.analysisRate() * 0.046 * 1.3 && attackSize * 2 <= PitchDetector::kHistory)
+                attackSize *= 2;
+            v.attackSpec.prepare (attackSize);
             v.scratch.assign ((size_t) PitchDetector::kHistory, 0.0f);
         }
         reset();
@@ -87,6 +93,14 @@ namespace gl
         v.detector.copyHistory (v.scratch.data(), n);
         v.timbreSpec.compute (v.scratch.data());
         return v.timbreSpec.timbre (hz, v.detector.analysisRate());
+    }
+
+    Overtones GuitarTracker::overtonesNow (Voice& v, double hz)
+    {
+        const int n = v.attackSpec.size();
+        v.detector.copyHistory (v.scratch.data(), n);
+        v.attackSpec.compute (v.scratch.data());
+        return v.attackSpec.overtones (hz, v.detector.analysisRate());
     }
 
     Chroma GuitarTracker::chromaNow (Voice& v)

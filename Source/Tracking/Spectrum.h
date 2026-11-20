@@ -12,6 +12,11 @@ namespace gl
     // The same pitch on a thicker string has a different pattern, which helps guess the string.
     using Timbre = std::array<float, kTimbreBins>;
 
+    // The same idea with more harmonics (2..16), measured right at the pick attack during a full calibration.
+    // Poly mode builds one fingerprint per string and fret from it (what this guitar sounds like when a note starts).
+    constexpr int kOvertones = 15;
+    using Overtones = std::array<float, kOvertones>;
+
     // How strong each of the 12 note names is in the sound (unit length). Used to recognise chords.
     using Chroma = std::array<float, 12>;
 
@@ -32,6 +37,7 @@ namespace gl
         void compute (const float* samples);
 
         Timbre timbre (double f0, double sampleRate) const;
+        Overtones overtones (double f0, double sampleRate) const; // harmonics 2..16, log2 of their strength vs. the fundamental
         Chroma chroma (double sampleRate, double centsOffset, double minHz = 60.0, double maxHz = 1000.0) const;
 
         // Sum of magnitudes, to check there is any sound at all.

@@ -130,11 +130,16 @@ Keep `Theory/`, `Midi/` and `Tracking/` free of JUCE, so they stay testable and 
 - Recorded bends keep their exact curve (so the sound is faithful); the tab text rounds them to half steps.
 - **Poly mode (`PolyTracker`)**, ~90 analyses a second: low-pass + downsample to ~12 kHz, 30 Hz low cut,
   2048-point FFT with a low-latency window (fast fall over the last 256 samples) on a log scale (3 bins per
-  semitone), square-rooted, explained by NMF (KL, 15 rounds, warm start) with one fixed fingerprint per pitch
-  plus a noise fingerprint. Fingerprints come from the Full calibration's tone colour (harmonics 2-9) when there
-  is one, else `1/h^1.3`. Notes start after `stableFrames - 1` frames (+1 below 105 Hz) and must pass:
+  semitone), square-rooted, explained by NMF (KL, 15 rounds, warm start) with fixed fingerprints plus a noise
+  fingerprint. Without calibration: one fingerprint per pitch (`1/h^1.3`). After a Full calibration: one per string
+  and fret, from that spot's **attack fingerprint** (harmonics 2-16 measured 40-70 ms after the pick, `H` lines in
+  the calibration file); a pitch's activation is the sum of its fingerprints. The after-attack tone colour is NOT used
+  (it made Poly worse). Notes start after `stableFrames - 1` frames (+1 below 105 Hz) and must pass:
   enough share of the energy, not a harmonic "ghost" of a louder note (`isGhost`), own harmonic peaks
-  (`hasHarmonicPeaks`), not inside a ringing note's bend (`isClaimed`). Strings: a small search
+  (`hasHarmonicPeaks`), not inside a ringing note's bend (`isClaimed`). **Hysteresis** (`trackHysteresis`, 0..1,
+  default 0 = off): a pitch at +12/19/24/28/31 above a LOUDER note picked in the last ~8 frames (a candidate, a note
+  whose energy jumped at the attack, or a young note; re-picked notes do not count, or arpeggios break) needs up to
+  4x more share. It never delays a note. Strings: a small search
   (`startNotes`) - one note per string, hand span, near the hand, notes of the same strum may move string.
   In a strum of 3+ notes, `completeChord` adds octave notes hidden in a known shape (common shapes + taught chords)
   as soon as a new note starts (and again at ~75 and ~130 ms); when the pitches fit a shape exactly, notes move to
@@ -159,6 +164,8 @@ Keep `Theory/`, `Midi/` and `Tracking/` free of JUCE, so they stay testable and 
   (Again / Use it anyway / Skip). Frames only count while listening, and only after a NEW pick attack (or sound after
   a quiet moment), so a note still ringing from the step before is ignored. Each fret of a Full calibration is its own
   item. `back()` restores the snapshot taken before the previous item. 10 s of nothing: back to Ready.
+  **Auto listen** (wizard switch + delay, remembered in `UiMemory` "Calibration") presses Listen by itself a set time
+  after a step is Ready; never in Decide, and "Stop listening" pauses it until the next step.
 - **Every control needs a detailed tooltip.** First line = short title (shown bold), then plain-English lines
   that explain what it does and when to use it. Components that change by hover (fretboard, piano, tab view,
   chord cards) implement `getTooltip()` to describe what is under the mouse.

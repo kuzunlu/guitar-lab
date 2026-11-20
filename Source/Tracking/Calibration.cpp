@@ -104,6 +104,12 @@ namespace gl
                 out << "P " << s << ' ' << f << ' ' << p.cents << ' ' << p.level << ' ' << (int) p.hasTimbre;
                 for (float t : p.timbre) out << ' ' << t;
                 out << '\n';
+                if (p.hasAttack)
+                {
+                    out << "H " << s << ' ' << f;
+                    for (float a : p.attack) out << ' ' << a;
+                    out << '\n';
+                }
             }
         }
 
@@ -193,6 +199,18 @@ namespace gl
                     p.measured = true;
                     p.hasTimbre = ht != 0;
                     positions[(size_t) s][(size_t) f] = p;
+                }
+            }
+            else if (tag == "H") // after its "P" line
+            {
+                int s = -1, f = -1;
+                Overtones a {};
+                ls >> s >> f;
+                for (auto& v : a) ls >> v;
+                if (ls && s >= 0 && s < kMaxStrings && f >= 0 && f <= kNumFrets)
+                {
+                    positions[(size_t) s][(size_t) f].attack = a;
+                    positions[(size_t) s][(size_t) f].hasAttack = true;
                 }
             }
             else if (tag == "K")
@@ -432,6 +450,7 @@ namespace gl
         pitches.clear();
         peaks.clear();
         timbres.clear();
+        attacks.clear();
         chromas.clear();
         channelEnergy.fill (0.0f);
         strums = 0;
@@ -680,6 +699,10 @@ namespace gl
         p.level = peaks.empty() ? 0.0f : median (peaks);
         p.hasTimbre = ! timbres.empty();
         p.timbre = meanTimbre (timbres);
+        p.hasAttack = ! attacks.empty();
+        p.attack = {};
+        for (const auto& a : attacks)
+            for (int k = 0; k < kOvertones; ++k) p.attack[(size_t) k] += a[(size_t) k] / (float) attacks.size();
         if (p.level > 0.0f) spotLevels.push_back (p.level);
 
         auto& sc = cal.strings[(size_t) s];
@@ -872,6 +895,11 @@ namespace gl
 
             noteTime += hop;
             if (f.rms < gate * 0.5f) { noteActive = false; return; }
+
+            // The sound of the attack itself (what Poly hears when it decides), on the right note only.
+            if (everyNote && f.hasOvertones && noteTime >= 0.04 && noteTime <= 0.07
+                && std::abs (hzToMidi (f.hz) - expectedNote()) < 0.5)
+                attacks.push_back (f.overtones);
 
             if (noteTime > kSkipAttack && f.clarity > 0.85f && f.hz > 0.0f)
             {

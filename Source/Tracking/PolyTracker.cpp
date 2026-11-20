@@ -85,15 +85,10 @@ namespace gl
             table[(size_t) j] = table[(size_t) (2 * centre - j)] = (float) std::sqrt (re * re + im * im);
         }
 
-        // Fingerprint per pitch: its harmonics, blurred the same way a real note is, in log bins.
-        templates.assign ((size_t) numPitches + 1, {});
+        // Fingerprint: the harmonics of a note, blurred the same way a real note is, in log bins.
         std::vector<float> lin ((size_t) kLong / 2), logv ((size_t) numBins), blurred ((size_t) numBins);
-        for (int p = 0; p < numPitches; ++p)
+        auto makeTemplate = [&] (double f0, const std::array<float, kMaxHarmonics + 1>& amps)
         {
-            const int midi = lowestPitch + p;
-            const double f0 = midiToHz (midi + tune);
-            const auto amps = harmonicProfile (midi);
-
             std::fill (lin.begin(), lin.end(), 0.0f);
             for (int h = 1; h <= kMaxHarmonics; ++h)
             {
@@ -123,23 +118,61 @@ namespace gl
                 sum += blurred[(size_t) b];
                 peak = std::max (peak, blurred[(size_t) b]);
             }
-            auto& t = templates[(size_t) p];
+            std::vector<Entry> t;
             for (int b = 0; b < numBins; ++b)
                 if (sum > 0.0f && blurred[(size_t) b] > peak * 1.0e-3f)
                     t.push_back ({ b, blurred[(size_t) b] / sum });
+            return t;
+        };
+
+        // One fingerprint per pitch. After a full calibration that heard the attacks: one per string and fret instead,
+        // with that spot's real sound at the start of a note and its real pitch. Then a note on the low E sounds
+        // different from the same note on the G string, and a string's overtones are explained by the string itself.
+        templates.clear();
+        templatePitch.clear();
+        pitchTemplates.assign ((size_t) numPitches, {});
+        for (int p = 0; p < numPitches; ++p)
+        {
+            const int midi = lowestPitch + p;
+            for (int str = 0; str < inst.numStrings(); ++str)
+            {
+                const int fret = midi - inst.tuning()[(size_t) str];
+                const auto* pos = fret <= cal.lastFret[(size_t) str] ? cal.position (str, fret) : nullptr;
+                if (pos == nullptr || ! pos->hasAttack) continue;
+
+                std::array<float, kMaxHarmonics + 1> amps {};
+                amps[1] = 1.0f;
+                for (int k = 0; k < kOvertones; ++k)
+                    amps[(size_t) k + 2] = std::pow (2.0f, pos->attack[(size_t) k]);
+                for (int h = kOvertones + 2; h <= kMaxHarmonics; ++h)
+                    amps[(size_t) h] = amps[kOvertones + 1] * std::pow ((float) (kOvertones + 1) / h, 1.2f);
+
+                pitchTemplates[(size_t) p].push_back ((int) templates.size());
+                templates.push_back (makeTemplate (midiToHz (midi + pos->cents / 100.0), amps));
+                templatePitch.push_back (p);
+            }
+            if (pitchTemplates[(size_t) p].empty())
+            {
+                pitchTemplates[(size_t) p].push_back ((int) templates.size());
+                templates.push_back (makeTemplate (midiToHz (midi + tune), harmonicProfile (midi)));
+                templatePitch.push_back (p);
+            }
         }
 
-        dense.assign ((size_t) numPitches * (size_t) numBins, 0.0f);
-        for (int q = 0; q < numPitches; ++q)
-            for (const auto& e : templates[(size_t) q])
-                dense[(size_t) q * (size_t) numBins + (size_t) e.bin] = e.w;
+        dense.assign (templates.size() * (size_t) numBins, 0.0f);
+        for (size_t q = 0; q < templates.size(); ++q)
+            for (const auto& e : templates[q])
+                dense[q * (size_t) numBins + (size_t) e.bin] = e.w;
 
         // Broadband noise (pick attack, string noise): soaks up energy that is not a note.
+        templates.emplace_back();
+        templatePitch.push_back (numPitches);
         for (int b = 0; b < numBins; ++b)
             templates.back().push_back ({ b, 1.0f / numBins });
 
         buildShapes();
         x.assign ((size_t) numPitches + 1, 0.0f);
+        act.assign (templates.size(), 0.0f);
         history.assign ((size_t) numPitches, {});
         candidate.assign ((size_t) numPitches, 0);
         onsetX.assign ((size_t) numPitches, 0.0f);
@@ -285,6 +318,7 @@ namespace gl
         std::fill (ring.begin(), ring.end(), 0.0f);
         std::fill (prevShort.begin(), prevShort.end(), 0.0f);
         std::fill (x.begin(), x.end(), 0.0f);
+        std::fill (act.begin(), act.end(), 0.0f);
         for (auto& h : history) h.fill (0.0f);
         std::fill (candidate.begin(), candidate.end(), 0);
         for (auto& n : notes) n = {};
@@ -304,29 +338,12 @@ namespace gl
 
     std::array<float, PolyTracker::kMaxHarmonics + 1> PolyTracker::harmonicProfile (int midi) const
     {
-        // Typical guitar: harmonics get weaker slowly.
+        // Typical guitar: harmonics get weaker slowly. (The calibration's tone colour is NOT used here: it is measured
+        // after the attack, and made Poly worse on real guitars. Calibrated fingerprints come from the attack instead.)
         std::array<float, kMaxHarmonics + 1> a {};
         for (int h = 1; h <= kMaxHarmonics; ++h)
             a[(size_t) h] = 1.0f / std::pow ((float) h, 1.3f);
-
-        // Full calibration: the measured tone colour of every spot that plays this pitch (harmonics 2-9).
-        Timbre sum {};
-        int count = 0;
-        for (int s = 0; s < inst.numStrings(); ++s)
-            if (auto* pos = cal.position (s, midi - inst.tuning()[(size_t) s]); pos != nullptr && pos->hasTimbre)
-            {
-                for (int k = 0; k < kTimbreBins; ++k) sum[(size_t) k] += pos->timbre[(size_t) k];
-                ++count;
-            }
-
-        if (count > 0)
-        {
-            a[1] = 1.0f;
-            for (int k = 0; k < kTimbreBins; ++k)
-                a[(size_t) k + 2] = std::pow (2.0f, sum[(size_t) k] / count);
-            for (int h = kTimbreBins + 2; h <= kMaxHarmonics; ++h)
-                a[(size_t) h] = a[kTimbreBins + 1] * std::pow ((float) (kTimbreBins + 1) / h, 1.2f);
-        }
+        (void) midi;
         return a;
     }
 
@@ -405,15 +422,15 @@ namespace gl
         // Starts from the last frame's answer, so a few rounds are enough.
         float total = 0.0f;
         for (float v : V) total += v;
-        const float floor = 1.0e-3f * total / (float) x.size();
-        for (auto& a : x) a = std::max (a * 0.85f, floor);
+        const float floor = 1.0e-3f * total / (float) act.size();
+        for (auto& a : act) a = std::max (a * 0.85f, floor);
 
         for (int it = 0; it < kNmfIterations; ++it)
         {
             std::fill (WX.begin(), WX.end(), 1.0e-9f);
             for (size_t p = 0; p < templates.size(); ++p)
             {
-                const float a = x[p];
+                const float a = act[p];
                 if (a <= 0.0f) continue;
                 for (const auto& e : templates[p]) WX[(size_t) e.bin] += a * e.w;
             }
@@ -423,14 +440,19 @@ namespace gl
             {
                 float num = 0.0f;
                 for (const auto& e : templates[p]) num += e.w * ratio[(size_t) e.bin];
-                x[p] *= num / (1.0f + kSparsity); // every fingerprint sums to 1
+                act[p] *= num / (1.0f + kSparsity); // every fingerprint sums to 1
             }
         }
 
         // The model with the final activations (used to see what each note explains).
         std::fill (WX.begin(), WX.end(), 1.0e-9f);
         for (size_t p = 0; p < templates.size(); ++p)
-            for (const auto& e : templates[p]) WX[(size_t) e.bin] += x[p] * e.w;
+            for (const auto& e : templates[p]) WX[(size_t) e.bin] += act[p] * e.w;
+
+        // Per pitch: its fingerprints added up (without attack fingerprints there is exactly one per pitch).
+        std::fill (x.begin(), x.end(), 0.0f);
+        for (size_t t = 0; t < templates.size(); ++t)
+            x[(size_t) templatePitch[t]] += act[t];
     }
 
     // -----------------------------------------------------------------------
@@ -484,7 +506,10 @@ namespace gl
         for (int b = b0 - 1; b <= b0 + 1; ++b)
             if (b >= 0 && b < numBins)
             {
-                const float others = WX[(size_t) b] - x[(size_t) p] * dense[(size_t) p * (size_t) numBins + (size_t) b];
+                float own = 0.0f;
+                for (int t : pitchTemplates[(size_t) p])
+                    own += act[(size_t) t] * dense[(size_t) t * (size_t) numBins + (size_t) b];
+                const float others = WX[(size_t) b] - own;
                 best = std::max (best, V[(size_t) b] - others);
             }
         return best;
@@ -605,22 +630,46 @@ namespace gl
 
         }
 
+        // Hysteresis: a pitch on an overtone of a louder note from the same pick (started in the last ~85 ms, or about
+        // to start) needs more energy, so a single note's overtones are not taken for a chord. Other pitches, and the
+        // overtones of older ringing notes (an arpeggio), are not touched. 0 = off.
+        std::array<bool, 128> young {};
+        float pitchSum = 1.0e-9f;
+        if (settings.hysteresis > 0.0)
+            for (int q = 0; q < std::min (numPitches, 128); ++q)
+            {
+                const auto& n = notes[(size_t) q];
+                // Low notes need longer to start than their overtones: a pitch whose energy jumped at the pick
+                // attack counts as just picked even before it is ready to start.
+                const bool jumped = sinceOnset <= 8 && x[(size_t) q] > 2.5f * history[(size_t) q][(size_t) historyPos]
+                                 && x[(size_t) q] > onShare * total;
+                young[(size_t) q] = candidate[(size_t) q] > 0 || jumped || (n.on && ! n.hidden && ! n.repicked && n.age <= 8);
+                pitchSum += x[(size_t) q];
+            }
+
         // --- New notes: strong for a few frames, not a harmonic of a louder note, not part of a bend ---
         int count = 0;
         for (int p = 0; p < numPitches; ++p)
         {
             if (notes[(size_t) p].on) { candidate[(size_t) p] = 0; continue; }
 
+            float parent = 0.0f;
+            if (settings.hysteresis > 0.0)
+                for (int step : { 12, 19, 24, 28, 31 })
+                    if (const int q = p - step; q >= 0 && q < 128 && young[(size_t) q] && x[(size_t) q] > x[(size_t) p])
+                        parent = std::max (parent, x[(size_t) q]);
+            const float startShare = onShare * (1.0f + 3.0f * (float) settings.hysteresis * parent / pitchSum);
+
             const float share = x[(size_t) p] / total;
             // New energy right after a pick attack: a note picked now, even if it sits on the harmonics of a
             // note that already rings (an arpeggio going up an octave).
             const float before = history[(size_t) p][(size_t) historyPos]; // 4 frames ago
             const bool rising = sinceOnset <= 8 && x[(size_t) p] > 2.5f * before
-                             && x[(size_t) p] - before > 0.5f * onShare * total;
+                             && x[(size_t) p] - before > 0.5f * startShare * total;
 
-            bool ok = level > gateOn && (share > onShare || rising) && x[(size_t) p] > (rising ? 0.04f : 0.12f) * strongest;
+            bool ok = level > gateOn && (share > startShare || rising) && x[(size_t) p] > (rising ? 0.04f : 0.12f) * strongest;
             // Without a pick attack (hammer-on, slow swell) only a clearly strong note may start.
-            if (ok && sinceOnset > 8 && share < 2.0f * onShare) ok = false;
+            if (ok && sinceOnset > 8 && share < 2.0f * startShare) ok = false;
             if (ok && (isGhost (p, rising) || isClaimed (p) || ! hasHarmonicPeaks (p))) ok = false;
             // Right after a pick attack the window holds only a little of the new note: its pitch is still blurred.
             // Low notes need one frame more (their harmonics are closer together).
@@ -660,6 +709,7 @@ namespace gl
                     if (bend[(size_t) s] != 8192) sendBend (s, 8192);
                     send ((uint8_t) (0x90 | (channelOf (s) - 1)), (uint8_t) (lowestPitch + p), (uint8_t) velocityFor (p, s, f, false));
                     notes[(size_t) p] = { true, s, f, x[(size_t) p], 0, 0.0, 0 };
+                    notes[(size_t) p].repicked = true;
                 }
             }
         }

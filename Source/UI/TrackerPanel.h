@@ -5,6 +5,7 @@
 #include "UI/FretboardComponent.h"
 #include "UI/IntonationView.h"
 #include "UI/Theme.h"
+#include "UI/UiMemory.h"
 
 namespace gl
 {
@@ -40,6 +41,7 @@ namespace gl
         bool keyPressed (const juce::KeyPress&) override; // Space / Enter = Listen
         void feed (const AnalysisFrame& f, double hopSeconds);
         void tick();                            // ~30 times a second: refresh texts
+        void restoreUi() { memory.restoreAll(); } // after a project was loaded
         bool isListening() const { return page == Page::Running; }
         int  expectedNote() const { return session.expectedNote(); }
         int  expectedString() const { return session.currentString(); }
@@ -72,7 +74,13 @@ namespace gl
                          endFretsButton { "My guitar ends here" }, cancelButton { "Cancel" },
                          listenButton { "Listen" }, backButton { "Back" }, acceptButton { "Use it anyway" }, skipButton { "Skip" },
                          saveButton { "Save calibration" }, discardButton { "Discard" };
+        juce::ToggleButton autoToggle { "Auto listen" };
+        juce::Slider autoDelay;
         double shownProgress = 0.0;
+        juce::uint32 readySince = 0;            // auto listen: when the current step became ready
+        int autoPausedStep = -1;                // "Stop listening" was pressed on this step: no auto listen until the next
+
+        UiMemory memory { proc.uiState, "Calibration" }; // last member: see UiMemory
     };
 
     class TrackerPanel : public juce::Component
@@ -82,6 +90,7 @@ namespace gl
         ~TrackerPanel() override;
 
         void refresh();      // instrument or calibration changed
+        void restoreUi() { wizard.restoreUi(); } // after a project was loaded
         void timerTick();    // ~30 times a second
 
         // Fretboard marks while calibrating (what to play next).
@@ -107,7 +116,7 @@ namespace gl
 
         GuitarLabProcessor& proc;
 
-        juce::Label modeLabel, inputLabel, safetyLabel, sensLabel, calStatus, warning, help, presetLabel;
+        juce::Label modeLabel, inputLabel, safetyLabel, sensLabel, hystLabel, calStatus, warning, help, presetLabel;
         juce::ComboBox presetBox;
         juce::TextEditor presetName;
         juce::TextButton savePresetButton { "Save as preset" }, deletePresetButton { "Delete" };
@@ -116,7 +125,7 @@ namespace gl
         juce::String presetMessage;       // shown in the warning line for a few seconds
         juce::uint32 presetMessageAt = 0;
         juce::ComboBox modeBox, inputBox;
-        juce::Slider safety, sensitivity;
+        juce::Slider safety, sensitivity, hysteresis;
         juce::ToggleButton bendsToggle { "Track bends / slides / vibrato" }, monitorToggle { "Hear guitar" },
                            soundToggle { "Built-in sound" };
         juce::TextButton calibrateButton { "Calibrate..." }, intonationButton { "Intonation..." };
@@ -133,7 +142,7 @@ namespace gl
 
         using APVTS = juce::AudioProcessorValueTreeState;
         std::unique_ptr<APVTS::ComboBoxAttachment> modeAtt, inputAtt;
-        std::unique_ptr<APVTS::SliderAttachment> safetyAtt, sensAtt;
+        std::unique_ptr<APVTS::SliderAttachment> safetyAtt, sensAtt, hystAtt;
         std::unique_ptr<APVTS::ButtonAttachment> bendsAtt, monitorAtt, soundAtt;
     };
 }

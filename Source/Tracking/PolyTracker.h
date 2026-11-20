@@ -32,6 +32,7 @@ namespace gl
             bool   trackBends = true;
             int    bendRange = 12;
             int    firstChannel = 2;
+            double hysteresis = 0.0;   // 0..1: a pitch on an overtone of a louder, just-picked note needs up to 4x more energy (0 = off)
         };
 
         // Allocates and builds the fingerprints: call from the message thread.
@@ -116,6 +117,7 @@ namespace gl
             double dev = 0.0;     // bend, in semitones
             int    age = 0;       // frames since start
             bool   hidden = false;// octave note added from a chord shape (lives as long as its lower octave)
+            bool   repicked = false; // started again by a pick attack no new note explained (not a fresh note for hysteresis)
         };
 
         void analyse();
@@ -169,9 +171,14 @@ namespace gl
 
         // Pitches and their fingerprints (last template = broadband noise, for pick attacks)
         int lowestPitch = 40, numPitches = 0;
+        // One fingerprint per pitch; after a full calibration with attack fingerprints, one per string and fret
+        // instead (the noise fingerprint is always the last one).
         std::vector<std::vector<Entry>> templates;
-        std::vector<float> dense;               // the same fingerprints as a full table [pitch * numBins + bin]
-        std::vector<float> x;                   // activation per template
+        std::vector<float> dense;               // the same fingerprints as a full table [fingerprint * numBins + bin]
+        std::vector<int> templatePitch;         // pitch of each fingerprint (numPitches = noise)
+        std::vector<std::vector<int>> pitchTemplates; // the fingerprints of each pitch
+        std::vector<float> act;                 // activation per fingerprint
+        std::vector<float> x;                   // activation per pitch (its fingerprints added up; last = noise)
         std::vector<std::array<float, 4>> history;
         int historyPos = 0;
         std::vector<int> candidate;             // frames in a row a pitch looked like a new note

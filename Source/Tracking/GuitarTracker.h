@@ -26,6 +26,7 @@ namespace gl
         int    bendRange = 12;       // must match the MIDI settings
         int    firstChannel = 2;     // MIDI channel of the highest string
         bool   features = false;     // calibration: send tone colour + chord fingerprints with the frames
+        double hysteresis = 0.0;     // poly: 0..1, an overtone of a louder, just-picked note needs more energy (0 = off)
     };
 
     // Turns guitar audio into MIDI: notes on per-string channels, pitch bend, velocity.
@@ -53,7 +54,7 @@ namespace gl
         struct Voice
         {
             PitchDetector detector;
-            Spectrum timbreSpec, chromaSpec;
+            Spectrum timbreSpec, chromaSpec, attackSpec;
             std::vector<float> scratch;
             int   hopCount = 0;
 
@@ -99,6 +100,7 @@ namespace gl
         double centsCorrection (const Voice& v) const;
         int    velocityFor (int string, int fret, float peak) const;
         Timbre timbreNow (Voice& v, double hz);
+        Overtones overtonesNow (Voice& v, double hz);
         Chroma chromaNow (Voice& v);
         float  leakLevel (const Voice& v) const; // hex: level that may be leak from other strings
 
@@ -160,6 +162,13 @@ namespace gl
                     f.hasFeatures = true;
                     f.timbre = timbreNow (v, r.hz);
                     f.chroma = chromaNow (v);
+                }
+                // ...and (normal guitar) the overtones at the attack, every 2nd hop: Poly's fingerprints.
+                if (settings.features && settings.mode != TrackMode::Hex && (v.hopCount % 2) == 0
+                    && r.hz > 0.0 && r.clarity > 0.8 && r.rms > 1.0e-4)
+                {
+                    f.hasOvertones = true;
+                    f.overtones = overtonesNow (v, r.hz);
                 }
 
                 frame (f);

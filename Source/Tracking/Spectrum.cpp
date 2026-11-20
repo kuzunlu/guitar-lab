@@ -103,6 +103,20 @@ namespace gl
         return t;
     }
 
+    Overtones Spectrum::overtones (double f0, double rate) const
+    {
+        Overtones t {};
+        if (f0 <= 0.0) return t;
+
+        const float h1 = peakNear (f0, rate) + 1e-6f;
+        for (int k = 2; k < 2 + kOvertones; ++k)
+        {
+            const float hk = (k * f0 < rate * 0.45) ? peakNear (k * f0, rate) : 0.0f;
+            t[(size_t) (k - 2)] = std::clamp (std::log2 ((hk + 1e-6f) / h1), -10.0f, 4.0f);
+        }
+        return t;
+    }
+
     Chroma Spectrum::chroma (double rate, double centsOffset, double minHz, double maxHz) const
     {
         Chroma c {};

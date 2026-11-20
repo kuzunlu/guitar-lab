@@ -40,6 +40,7 @@ namespace ParamIDs
     inline constexpr auto trackSensitivity = "trackSensitivity";
     inline constexpr auto trackBends       = "trackBends";
     inline constexpr auto trackMonitor     = "trackMonitor";
+    inline constexpr auto trackHysteresis  = "trackHysteresis";
     inline constexpr auto metronome        = "metronome";
 }
 
