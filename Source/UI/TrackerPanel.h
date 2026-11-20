@@ -29,6 +29,24 @@ namespace gl
         juce::String getTooltip() override;
     };
 
+    // The notes the tracker sent, newest first (to see what went wrong: a ghost octave, a double note...).
+    class NoteLogView : public juce::Component,
+                        public juce::TooltipClient
+    {
+    public:
+        struct Entry { juce::int64 start = 0, end = -1; int note = 0, string = -1, fret = -1, velocity = 0; bool samePick = false; };
+        void noteOn (juce::int64 sample, int note, int string, int fret, int velocity);
+        void noteOff (juce::int64 sample, int note, int string);
+        void clear() { entries.clear(); repaint(); }
+        double rate = 48000.0;
+
+        void paint (juce::Graphics&) override;
+        juce::String getTooltip() override;
+
+    private:
+        std::vector<Entry> entries; // oldest first, at most 200
+    };
+
     // One thing to play at a time: the player presses Listen (or Space), plays, sees OK, and the next thing appears.
     // Back goes to the thing before. The session lives in the processor, so closing the window only pauses it.
     class CalibrationWizard : public juce::Component
@@ -135,6 +153,9 @@ namespace gl
         IntonationView intonation;
 
         TunerView tuner;
+        NoteLogView noteLog;
+        juce::TextButton clearLogButton { "Clear" };
+        std::vector<GuitarLabProcessor::TrackedEvent> trackedBuffer = std::vector<GuitarLabProcessor::TrackedEvent> (1024);
         CalibrationWizard wizard;
 
         struct Last { float hz = 0, clarity = 0, rms = 0; };

@@ -117,6 +117,65 @@ namespace gl
     }
 
     // =======================================================================
+    // NoteLogView
+    // =======================================================================
+    void NoteLogView::noteOn (juce::int64 sample, int note, int string, int fret, int velocity)
+    {
+        Entry e { sample, -1, note, string, fret, velocity, false };
+        e.samePick = ! entries.empty() && (double) (sample - entries.back().start) < 0.04 * rate;
+        if (e.samePick) entries.back().samePick = true;
+        entries.push_back (e);
+        if (entries.size() > 200) entries.erase (entries.begin());
+        repaint();
+    }
+
+    void NoteLogView::noteOff (juce::int64 sample, int note, int string)
+    {
+        for (auto it = entries.rbegin(); it != entries.rend(); ++it)
+            if (it->note == note && it->string == string && it->end < 0) { it->end = sample; repaint(); return; }
+    }
+
+    void NoteLogView::paint (juce::Graphics& g)
+    {
+        g.setColour (theme::panel);
+        g.fillRoundedRectangle (getLocalBounds().toFloat(), 4.0f);
+        auto r = getLocalBounds().reduced (8, 4);
+        g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+        g.setColour (theme::textDim);
+        g.drawText ("Notes sent (newest first)", r.removeFromTop (20), juce::Justification::centredLeft);
+        g.setFont (juce::FontOptions (13.0f));
+        const int rowH = 18;
+        for (auto it = entries.rbegin(); it != entries.rend() && r.getHeight() >= rowH; ++it)
+        {
+            auto row = r.removeFromTop (rowH);
+            if (it->samePick)
+            {
+                g.setColour (theme::accent.withAlpha (0.12f));
+                g.fillRect (row);
+            }
+            g.setColour (it->end < 0 ? theme::sounding : theme::text);
+            g.drawText (midiNoteName (it->note), row.removeFromLeft (44), juce::Justification::centredLeft);
+            g.setColour (theme::text);
+            g.drawText (it->string >= 0 ? "str " + juce::String (it->string + 1) + "  fr " + juce::String (it->fret) : juce::String ("?"),
+                        row.removeFromLeft (92), juce::Justification::centredLeft);
+            g.drawText ("vel " + juce::String (it->velocity), row.removeFromLeft (60), juce::Justification::centredLeft);
+            g.setColour (theme::textDim);
+            const juce::String len = it->end < 0 ? juce::String ("ringing")
+                                                 : juce::String ((double) (it->end - it->start) / rate, 2) + " s";
+            g.drawText (len, row.removeFromLeft (64), juce::Justification::centredLeft);
+            g.drawText (juce::String ((double) it->start / rate, 2), row, juce::Justification::centredRight);
+        }
+    }
+
+    juce::String NoteLogView::getTooltip()
+    {
+        return "Notes sent\nEvery note the tracker sent as MIDI, newest at the top: note, string and fret, velocity, how long "
+               "it rang (green = still ringing), and when it started (seconds since the plugin started).\n"
+               "Notes started by the same pick (within 40 ms) have a yellow band. If you played ONE note and see a band "
+               "with several notes, those are overtones taken for notes: try the Hysteresis slider.";
+    }
+
+    // =======================================================================
     // CalibrationWizard
     // =======================================================================
     CalibrationWizard::CalibrationWizard (GuitarLabProcessor& p) : proc (p)
@@ -767,6 +826,10 @@ namespace gl
         addAndMakeVisible (help);
 
         addAndMakeVisible (tuner);
+        addAndMakeVisible (noteLog);
+        clearLogButton.setTooltip ("Clear\nEmpties the list of notes sent.");
+        clearLogButton.onClick = [this] { noteLog.clear(); };
+        addAndMakeVisible (clearLogButton);
 
         wizard.onClose = [this] { wizard.setVisible (false); updateStatus(); };
         addChildComponent (wizard);
@@ -958,6 +1021,19 @@ namespace gl
         for (int c = 0; c < kMaxStrings; ++c)
             if (! fresh[(size_t) c]) last[(size_t) c].rms *= 0.8f;
 
+        // Notes the tracker sent: into the note log (string from the MIDI channel).
+        noteLog.rate = proc.getSampleRate() > 0.0 ? proc.getSampleRate() : 48000.0;
+        const int numTracked = proc.popTrackedEvents (trackedBuffer.data(), (int) trackedBuffer.size());
+        for (int i = 0; i < numTracked; ++i)
+        {
+            const auto& e = trackedBuffer[(size_t) i];
+            const int s = (e.status & 0x0F) + 1 - proc.midiSettings.firstChannel;
+            const bool validString = s >= 0 && s < proc.instrument.numStrings();
+            const int fret = validString ? e.data1 - proc.instrument.tuning()[(size_t) s] : -1;
+            if ((e.status & 0xF0) == 0x90 && e.data2 > 0) noteLog.noteOn (e.sample, e.data1, validString ? s : -1, fret, e.data2);
+            else                                          noteLog.noteOff (e.sample, e.data1, validString ? s : -1);
+        }
+
         if (wizard.isVisible())
             wizard.tick();
 
@@ -1043,6 +1119,10 @@ namespace gl
 
         warning.setBounds (row (20));
         help.setBounds (row (20));
+        auto logArea = r.removeFromRight (juce::jmin (340, r.getWidth() / 3));
+        r.removeFromRight (6);
+        clearLogButton.setBounds (logArea.getRight() - 58, logArea.getY() + 2, 54, 20);
+        noteLog.setBounds (logArea);
         tuner.setBounds (r);
         wizard.setBounds (getLocalBounds().reduced (20, 10));
         intonation.setBounds (getLocalBounds().reduced (10));

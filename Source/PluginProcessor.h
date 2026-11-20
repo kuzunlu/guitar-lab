@@ -181,6 +181,15 @@ public:
         uint8_t status = 0, data1 = 0, data2 = 0;
     };
     std::atomic<bool> recordingGuitar { false };
+
+    // --- Every note the tracker sends (note log, "Try it", saved clips) ---
+    struct TrackedEvent
+    {
+        juce::int64 sample = 0;   // audio samples since the plugin started
+        uint8_t status = 0, data1 = 0, data2 = 0;
+    };
+    int popTrackedEvents (TrackedEvent* dest, int maxEvents); // message thread
+    juce::int64 samplesSoFar() const { return samplesProcessed.load(); }
     int    popRecordEvents (RecordEvent* dest, int maxEvents); // message thread
     double currentBpm() const { return renderBpm(); }
 
@@ -252,6 +261,9 @@ private:
     juce::AbstractFifo recordFifo { 16384 };
     std::vector<RecordEvent> recordStore = std::vector<RecordEvent> (16384);
     bool   wasRecording = false;
+    juce::AbstractFifo trackedFifo { 4096 };
+    std::vector<TrackedEvent> trackedStore = std::vector<TrackedEvent> (4096);
+    std::atomic<juce::int64> samplesProcessed { 0 };
     bool   recordUsesTransport = false;
     double recordClock = 0.0;
 

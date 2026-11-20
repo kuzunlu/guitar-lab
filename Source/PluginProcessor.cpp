@@ -161,6 +161,15 @@ int GuitarLabProcessor::popRecordEvents (RecordEvent* dest, int maxEvents)
     return n;
 }
 
+int GuitarLabProcessor::popTrackedEvents (TrackedEvent* dest, int maxEvents)
+{
+    const auto scope = trackedFifo.read (std::min (maxEvents, trackedFifo.getNumReady()));
+    int n = 0;
+    for (int i = 0; i < scope.blockSize1; ++i) dest[n++] = trackedStore[(size_t) (scope.startIndex1 + i)];
+    for (int i = 0; i < scope.blockSize2; ++i) dest[n++] = trackedStore[(size_t) (scope.startIndex2 + i)];
+    return n;
+}
+
 int GuitarLabProcessor::popFrames (gl::AnalysisFrame* dest, int maxFrames)
 {
     const auto scope = frameFifo.read (std::min (maxFrames, frameFifo.getNumReady()));
@@ -564,6 +573,14 @@ void GuitarLabProcessor::processBlock (juce::AudioBuffer<float>& audio, juce::Mi
                         return;
                     out.addEvent (juce::MidiMessage (status, d1, d2), juce::jlimit (0, numSamples - 1, offset));
 
+                    if ((status & 0xE0) == 0x80) // note-on or note-off: for the note log
+                    {
+                        const auto scope = trackedFifo.write (1);
+                        const TrackedEvent e { samplesProcessed.load() + offset, status, d1, d2 };
+                        if (scope.blockSize1 > 0)      trackedStore[(size_t) scope.startIndex1] = e;
+                        else if (scope.blockSize2 > 0) trackedStore[(size_t) scope.startIndex2] = e;
+                    }
+
                     if (recording)
                     {
                         const auto scope = recordFifo.write (1);
@@ -619,6 +636,7 @@ void GuitarLabProcessor::processBlock (juce::AudioBuffer<float>& audio, juce::Mi
             for (int c = 0; c < numIn; ++c)
                 audio.addFrom (ch, 0, inputCopy, c, 0, numCopied, 1.0f / (float) numIn);
 
+    samplesProcessed += numSamples;
     midi.swapWith (out);
 }
 
