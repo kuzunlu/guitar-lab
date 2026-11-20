@@ -214,6 +214,7 @@ namespace gl
         bool   needDecision = false;
         bool   noteActive = false;
         double noteTime = 0.0;
+        int    unclearFrames = 0;              // frames in a row without a clear pitch (to say why the bar stopped)
         std::vector<double> pitches;
         std::vector<float> peaks;
         std::vector<float> silence[kMaxStrings];

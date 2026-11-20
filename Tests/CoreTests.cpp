@@ -1229,6 +1229,31 @@ static void testCalibrationDraft()
     check (back.canGoBack(), "draft: Back works for steps after loading");
 }
 
+static void testCalibrationHints()
+{
+    // A note that fades before the bar is full: the wizard says so, keeps what it has, and a second pick finishes it.
+    Instrument g;
+    CalibrationSession cs;
+    cs.start (g, false, 1, false);
+    const double hop = 0.005;
+    cs.listen();
+    for (int i = 0; i < 700 && cs.step() == CalibrationSession::Step::Silence; ++i)
+        cs.feed ({ 0, 0.0f, 0.0f, 0.0005f, 0.001f }, hop);
+    const AnalysisFrame quiet { 0, 0.0f, 0.0f, 0.0004f, 0.0005f };
+    const AnalysisFrame note { 0, (float) midiToHz (cs.expectedNote()), 0.97f, 0.1f, 0.3f };
+    const int step = cs.stepNumber();
+
+    cs.listen();
+    for (int i = 0; i < 3; ++i) cs.feed (quiet, hop);
+    for (int i = 0; i < 50; ++i) cs.feed (note, hop);   // 0.25 s: not enough for an open string (0.6 s)
+    for (int i = 0; i < 3; ++i) cs.feed (quiet, hop);
+    check (cs.status().find ("faded too soon") != std::string::npos, "hint: a note that faded too soon is named");
+    check (cs.stepProgress() > 0.1 && cs.stepProgress() < 1.0 && cs.isListening(), "hint: the bar keeps what it has");
+
+    for (int i = 0; i < 150 && cs.stepNumber() == step; ++i) cs.feed (note, hop);
+    checkEq (cs.stepNumber(), step + 1, "hint: a second pick finishes the step");
+}
+
 static void testTimbreString()
 {
     Instrument g;
@@ -1764,6 +1789,7 @@ int main()
     testSpectrum();
     testFullCalibration();
     testCalibrationDraft();
+    testCalibrationHints();
     testTimbreString();
     testChordTracking();
     testPitchDetector();

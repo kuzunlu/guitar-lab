@@ -859,7 +859,16 @@ namespace gl
             {
                 noteActive = false;
                 if (chromas.size() > chromasAtStrumStart) // this strum gave fingerprints
+                {
                     ++strums;
+                    if (strums < kStrumsNeeded)
+                        say ("Strum " + std::to_string (strums) + " of " + std::to_string (kStrumsNeeded)
+                             + " heard. Strum again (let it ring about a second, or mute it first).", true);
+                }
+                else
+                {
+                    say ("That strum was too short to hear. Let it ring a little longer, then strum again.", true);
+                }
             }
         }
 
@@ -986,12 +995,18 @@ namespace gl
 
             if (! noteActive)
             {
-                if (f.rms > gate) { noteActive = true; noteTime = 0.0; }
+                if (f.rms > gate) { noteActive = true; noteTime = 0.0; unclearFrames = 0; }
                 return;
             }
 
             noteTime += hop;
-            if (f.rms < gate * 0.5f) { noteActive = false; return; }
+            if (f.rms < gate * 0.5f)
+            {
+                noteActive = false;
+                if (progress > 0.0 && progress < 1.0)
+                    say ("Not enough yet: the note faded too soon. Pick it again: the bar keeps what it has.", true);
+                return;
+            }
 
             // The sound of the attack itself (what Poly hears when it decides), on the right note only.
             if (everyNote && f.hasOvertones && noteTime >= 0.04 && noteTime <= 0.07
@@ -1003,6 +1018,12 @@ namespace gl
                 pitches.push_back (f.hz);
                 peaks.push_back (f.peak);
                 if (f.hasFeatures) timbres.push_back (f.timbre);
+                unclearFrames = 0;
+            }
+            else if (noteTime > kSkipAttack && ++unclearFrames == (int) (0.3 / hop))
+            {
+                say ("The pitch is not clear (fret buzz, a dead spot, or two strings ringing?). "
+                     "Pick it again, a little harder, and mute the other strings.", true);
             }
 
             const double needed = everyNote ? kSpotSeconds : kPitchSeconds;
@@ -1023,6 +1044,9 @@ namespace gl
                 noteActive = true;
                 noteTime = 0.0;
                 peaks.push_back (f.peak);
+                if ((int) peaks.size() < kHitsNeeded)
+                    say ("Pick " + std::to_string (peaks.size()) + " of " + std::to_string (kHitsNeeded)
+                         + " heard. Let it fade (or mute it), then pick again.", true);
             }
             else if (noteActive)
             {
