@@ -132,7 +132,11 @@ namespace gl
         stepLabel.setColour (juce::Label::textColourId, theme::textDim);
         stepLabel.setJustificationType (juce::Justification::centred);
 
-        for (auto* c : { &title, &body, &instruction, &status, &stepLabel })
+        headline.setJustificationType (juce::Justification::centred);
+        headline.setColour (juce::Label::textColourId, theme::accent);
+        headline.setMinimumHorizontalScale (0.5f);
+
+        for (auto* c : { &title, &body, &headline, &instruction, &status, &stepLabel })
             addAndMakeVisible (c);
 
         startButton.setTooltip ("Quick calibration (1-2 minutes)\nPress this when the tuning shown above matches your guitar.\n"
@@ -312,6 +316,7 @@ namespace gl
         autoDelay.setVisible (! done);
         cuesToggle.setVisible (! done);
         body.setVisible (! running);
+        headline.setVisible (running);
         instruction.setVisible (running);
         status.setVisible (running);
         stepLabel.setVisible (running);
@@ -396,6 +401,28 @@ namespace gl
         return s;
     }
 
+    juce::String CalibrationWizard::headlineText() const
+    {
+        using Step = CalibrationSession::Step;
+        const int s = session.currentString();
+        const auto& tuning = proc.instrument.tuning();
+        const juce::String str = s >= 0 && s < (int) tuning.size()
+            ? "String " + juce::String (s + 1) + " (" + juce::String (midiNoteName (tuning[(size_t) s])) + ")" : juce::String();
+        const juce::String dot = "  " + juce::String::charToString ((juce::juce_wchar) 0x00b7) + "  "; // middle dot
+        switch (session.step())
+        {
+            case Step::Silence:     return "Quiet";
+            case Step::OpenString:  return str + dot + "open";
+            case Step::TwelfthFret: return str + dot + "fret 12";
+            case Step::EveryNote:   return str + dot + "fret " + juce::String (session.expectedFret());
+            case Step::Chord:       return session.currentChord() != nullptr ? juce::String (session.currentChord()->name) : juce::String();
+            case Step::Soft:        return str + dot + "soft";
+            case Step::Hard:        return str + dot + "HARD";
+            case Step::Done:        break;
+        }
+        return {};
+    }
+
     void CalibrationWizard::playCues()
     {
         using Phase = CalibrationSession::Phase;
@@ -474,6 +501,7 @@ namespace gl
                 stepLabel.setText ("Step " + juce::String (session.stepNumber()) + " of " + juce::String (session.totalSteps())
                                    + (phase == Phase::Listening ? juce::String ("   -   listening: play now") : waiting),
                                    juce::dontSendNotification);
+                headline.setText (headlineText(), juce::dontSendNotification);
                 instruction.setText (juce::String (session.instruction()), juce::dontSendNotification);
                 status.setText (juce::String (session.status()), juce::dontSendNotification);
                 status.setColour (juce::Label::textColourId, phase == Phase::Listening ? theme::accent
@@ -544,7 +572,12 @@ namespace gl
         if (page == Page::Running)
         {
             stepLabel.setBounds (r.removeFromTop (22));
-            instruction.setBounds (r.removeFromTop (r.getHeight() / 2));
+            // The big headline gets what is left after the other lines, so it can be read from a distance.
+            const int rest = std::max (0, r.getHeight() - 22 - 44 - 70);
+            headline.setBounds (r.removeFromTop (rest));
+            headline.setFont (juce::FontOptions ((float) juce::jlimit (28, 110, (int) (rest * 0.6)), juce::Font::bold));
+            instruction.setFont (juce::FontOptions (rest > 120 ? 20.0f : 24.0f, juce::Font::bold));
+            instruction.setBounds (r.removeFromTop (70));
             status.setBounds (r.removeFromTop (44));
         }
         else

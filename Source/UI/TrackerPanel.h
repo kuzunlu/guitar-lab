@@ -69,7 +69,8 @@ namespace gl
         CalibrationSession& session = proc.work.calSession;
         Page page = Page::Tuning;
 
-        juce::Label title, body, instruction, status, stepLabel;
+        juce::Label title, body, headline, instruction, status, stepLabel;
+        juce::String headlineText() const;      // the current step in a few big words ("String 6 (E2) · fret 7")
         juce::TextButton startButton { "Quick calibration (1-2 min)" }, fullButton { "Full calibration (15-20 min)" },
                          endFretsButton { "My guitar ends here" }, cancelButton { "Cancel" },
                          listenButton { "Listen" }, backButton { "Back" }, acceptButton { "Use it anyway" }, skipButton { "Skip" },
