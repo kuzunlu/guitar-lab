@@ -154,6 +154,10 @@ public:
     bool isCountingIn() const { return countingIn.load(); }
     std::atomic<int> countInBeat { 0 };  // 1..4 while counting in (for the display)
 
+    // Short sounds for the calibration wizard, mixed into the audio output only (never MIDI). Message thread.
+    enum class Cue { None, Start, Ok, Problem };
+    void playCue (Cue c) { pendingCue = (int) c; }
+
     // --- Read by the UI to draw what is sounding ---
     std::atomic<double> playheadBeat { -1.0 };
     std::array<std::atomic<int>,   gl::kMaxStrings> soundingFret {};  // -1 = silent
@@ -197,6 +201,13 @@ private:
     void renderClicks (juce::AudioBuffer<float>& audio, const ClickPlan& plan);
     int    clickLeft = 0, clickTotal = 1;
     double clickPhase = 0.0, clickFreq = 1000.0;
+    // Calibration cues (audio thread): up to two tones one after the other.
+    void renderCue (juce::AudioBuffer<float>& audio);
+    std::atomic<int> pendingCue { 0 };
+    std::array<double, 2> cueFreq {};
+    std::array<int, 2> cueLength {};
+    int    cueTone = 2, cuePos = 0;
+    double cuePhase = 0.0;
     std::atomic<bool> countingIn { false }, countInReset { false }, countInRecord { false };
     std::atomic<double> countInStart { 0.0 };
     double countInClock = 0.0;

@@ -166,6 +166,8 @@ Keep `Theory/`, `Midi/` and `Tracking/` free of JUCE, so they stay testable and 
   item. `back()` restores the snapshot taken before the previous item. 10 s of nothing: back to Ready.
   **Auto listen** (wizard switch + delay, remembered in `UiMemory` "Calibration") presses Listen by itself a set time
   after a step is Ready; never in Decide, and "Stop listening" pauses it until the next step.
+  **Sound cues** (`proc.playCue`, audio output only): tick = listening started, ding-ding = OK, low tone = problem.
+  The wizard finds them by comparing phase and step number with the last tick (`playCues`).
 - **Every control needs a detailed tooltip.** First line = short title (shown bold), then plain-English lines
   that explain what it does and when to use it. Components that change by hover (fretboard, piano, tab view,
   chord cards) implement `getTooltip()` to describe what is under the mouse.

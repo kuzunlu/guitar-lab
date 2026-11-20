@@ -74,8 +74,10 @@ namespace gl
                          endFretsButton { "My guitar ends here" }, cancelButton { "Cancel" },
                          listenButton { "Listen" }, backButton { "Back" }, acceptButton { "Use it anyway" }, skipButton { "Skip" },
                          saveButton { "Save calibration" }, discardButton { "Discard" };
-        juce::ToggleButton autoToggle { "Auto listen" };
+        juce::ToggleButton autoToggle { "Auto listen" }, cuesToggle { "Sound cues" };
         juce::Slider autoDelay;
+        void playCues();                        // a cue when listening starts, a step passes, or something is wrong
+        int lastCuePhase = -1, lastCueStep = -1;
         double shownProgress = 0.0;
         juce::uint32 readySince = 0;            // auto listen: when the current step became ready
         int autoPausedStep = -1;                // "Stop listening" was pressed on this step: no auto listen until the next

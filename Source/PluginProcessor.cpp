@@ -313,6 +313,40 @@ void GuitarLabProcessor::renderClicks (juce::AudioBuffer<float>& audio, const Cl
     }
 }
 
+void GuitarLabProcessor::renderCue (juce::AudioBuffer<float>& audio)
+{
+    // Start = one short tick, Ok = a rising "ding-ding", Problem = one low, longer tone.
+    if (const int c = pendingCue.exchange (0); c != 0)
+    {
+        const auto ms = [this] (double m) { return (int) (currentSampleRate * m / 1000.0); };
+        if (c == (int) Cue::Start)   { cueFreq = { 1320.0, 0.0 };  cueLength = { ms (45), 0 }; }
+        if (c == (int) Cue::Ok)      { cueFreq = { 880.0, 1320.0 }; cueLength = { ms (80), ms (110) }; }
+        if (c == (int) Cue::Problem) { cueFreq = { 262.0, 0.0 };   cueLength = { ms (220), 0 }; }
+        cueTone = 0;
+        cuePos = 0;
+        cuePhase = 0.0;
+    }
+
+    for (int i = 0; i < audio.getNumSamples() && cueTone < 2; ++i)
+    {
+        const int len = cueLength[(size_t) cueTone];
+        if (len <= 0 || cuePos >= len)
+        {
+            ++cueTone;
+            cuePos = 0;
+            --i; // this sample belongs to the next tone
+            continue;
+        }
+        const float t = (float) cuePos / (float) len;
+        const float env = std::min (1.0f, t * 40.0f) * (1.0f - t) * (1.0f - t); // quick attack, soft fall
+        const float v = (float) std::sin (cuePhase) * 0.25f * env;
+        cuePhase += 2.0 * juce::MathConstants<double>::pi * cueFreq[(size_t) cueTone] / currentSampleRate;
+        ++cuePos;
+        for (int ch = 0; ch < audio.getNumChannels(); ++ch)
+            audio.addSample (ch, i, v);
+    }
+}
+
 void GuitarLabProcessor::setInternalPlaying (bool shouldPlay)
 {
     if (shouldPlay && ! internalPlaying.load())
@@ -577,6 +611,7 @@ void GuitarLabProcessor::processBlock (juce::AudioBuffer<float>& audio, juce::Mi
 
     // --- Metronome / count-in clicks ---
     renderClicks (audio, clicks);
+    renderCue (audio);
 
     // --- Hear the guitar itself (mixed to mono, sent to every output channel) ---
     if (numIn > 0 && params.getRawParameterValue (ParamIDs::trackMonitor)->load() > 0.5f)

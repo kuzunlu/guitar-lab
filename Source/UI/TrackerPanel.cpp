@@ -188,8 +188,16 @@ namespace gl
         autoDelay.setTooltip ("Auto listen delay\nHow long Guitar Lab waits after a step is ready before it starts "
                               "listening by itself (with 'Auto listen' on). Give yourself time to move your hand to the "
                               "next fret or chord: 1-2 s for the frets, 3-4 s for the chords.");
+        cuesToggle.setTooltip ("Sound cues\nShort sounds, so you do not have to look at the screen:\n"
+                               "  - a short tick when Guitar Lab starts listening: play now,\n"
+                               "  - a rising 'ding-ding' when the step is OK,\n"
+                               "  - a low tone when something is wrong (wrong fret, nothing heard, or you need to choose).\n"
+                               "They go to Guitar Lab's audio output only, never to MIDI. Best together with Auto listen.");
+        cuesToggle.setWantsKeyboardFocus (false);
+        cuesToggle.setToggleState (true, juce::dontSendNotification);
         memory.remember (autoToggle, "autoListen");
         memory.remember (autoDelay, "autoDelay");
+        memory.remember (cuesToggle, "soundCues");
 
         backButton.setTooltip ("Back\nGo back one step, for example when you played the wrong thing and it was still accepted. "
                                "The result of that step is forgotten; press Listen and play it again. Press Back more times "
@@ -220,6 +228,7 @@ namespace gl
             addChildComponent (b);
         addChildComponent (autoToggle);
         addChildComponent (autoDelay);
+        addChildComponent (cuesToggle);
         setWantsKeyboardFocus (true);
     }
 
@@ -301,6 +310,7 @@ namespace gl
         discardButton.setVisible (done);
         autoToggle.setVisible (! done);
         autoDelay.setVisible (! done);
+        cuesToggle.setVisible (! done);
         body.setVisible (! running);
         instruction.setVisible (running);
         status.setVisible (running);
@@ -386,8 +396,27 @@ namespace gl
         return s;
     }
 
+    void CalibrationWizard::playCues()
+    {
+        using Phase = CalibrationSession::Phase;
+        if (page == Page::Tuning) { lastCuePhase = lastCueStep = -1; return; }
+
+        const int phase = (int) session.phase(), step = session.stepNumber();
+        if (lastCuePhase >= 0 && cuesToggle.getToggleState())
+        {
+            const bool wasListening = lastCuePhase == (int) Phase::Listening;
+            if (phase == (int) Phase::Listening && ! wasListening)                         proc.playCue (GuitarLabProcessor::Cue::Start);
+            else if (wasListening && (step != lastCueStep || phase == (int) Phase::Done))  proc.playCue (GuitarLabProcessor::Cue::Ok);
+            else if (wasListening && phase == (int) Phase::Decide)                        proc.playCue (GuitarLabProcessor::Cue::Problem);
+            else if (wasListening && phase == (int) Phase::Ready && ! session.statusIsGood()) proc.playCue (GuitarLabProcessor::Cue::Problem);
+        }
+        lastCuePhase = phase;
+        lastCueStep = step;
+    }
+
     void CalibrationWizard::tick()
     {
+        playCues();
         switch (page)
         {
             case Page::Tuning:
@@ -498,6 +527,7 @@ namespace gl
         auto top = r.removeFromTop (30);
         autoDelay.setBounds (top.removeFromRight (170).reduced (0, 4));
         autoToggle.setBounds (top.removeFromRight (110));
+        cuesToggle.setBounds (top.removeFromRight (110));
         title.setBounds (top);
 
         auto buttons = r.removeFromBottom (30);
