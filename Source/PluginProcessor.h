@@ -116,6 +116,7 @@ public:
         gl::CalibrationSession calSession;
         int  calPage = 0;                        // CalibrationWizard::Page
         bool calOpen = false;
+        std::optional<gl::Calibration> calTryBackup; // "Try it": the calibration in use before the new one was tried
 
         // Play & Write
         std::vector<std::string> phraseUndo;

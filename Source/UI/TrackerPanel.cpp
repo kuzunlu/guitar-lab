@@ -1,5 +1,6 @@
 #include "UI/TrackerPanel.h"
 
+#include "Theory/ChordFinder.h"
 #include "Tracking/PitchDetector.h"
 
 #include <cmath>
@@ -267,6 +268,7 @@ namespace gl
                                "to go further back.");
         backButton.onClick = [this]
         {
+            if (trying()) stopTrying();
             session.back();
             if (page == Page::Done) showPage (Page::Running);
             tick();
@@ -280,6 +282,16 @@ namespace gl
         skipButton.setTooltip ("Skip\nSkip this step. Safe defaults are used for it.");
         skipButton.onClick = [this] { session.skip(); if (session.finished()) showPage (Page::Done); tick(); };
 
+        tryButton.setTooltip ("Try it\nTurns the new calibration on right now, before you save it: play notes and chords, "
+                              "and the notes Guitar Lab hears (and the chord name) show here in big letters. "
+                              "MIDI is sent as normal, so you can also listen with your instrument.\n"
+                              "Then press 'Save calibration' to keep it, or 'Discard' to go back to the old one.");
+        tryButton.onClick = [this] { if (trying()) stopTrying(); else startTrying(); tick(); };
+        tryLabel.setFont (juce::FontOptions (30.0f, juce::Font::bold));
+        tryLabel.setJustificationType (juce::Justification::centred);
+        tryLabel.setColour (juce::Label::textColourId, theme::sounding);
+        addChildComponent (tryLabel);
+
         saveButton.setTooltip ("Save calibration\nUse these results for tracking from now on. They are saved with your project.");
         saveButton.onClick = [this] { finish (true); };
 
@@ -287,7 +299,7 @@ namespace gl
         discardButton.onClick = [this] { finish (false); };
 
         for (auto* b : { &startButton, &fullButton, &endFretsButton, &cancelButton, &listenButton, &backButton, &acceptButton,
-                         &skipButton, &saveButton, &discardButton })
+                         &skipButton, &tryButton, &saveButton, &discardButton })
             addChildComponent (b);
         addChildComponent (autoToggle);
         addChildComponent (autoDelay);
@@ -337,7 +349,12 @@ namespace gl
     void CalibrationWizard::resume()
     {
         page = (Page) juce::jlimit (0, 2, proc.work.calPage);
-        if (page != Page::Tuning)
+        if (page == Page::Done && trying())
+        {
+            proc.calibrating = false;       // still trying the new calibration
+            proc.rebuildTracker();
+        }
+        else if (page != Page::Tuning)
         {
             startTracker();
             session.stop(); // the sound was not heard while the window was closed
@@ -371,6 +388,8 @@ namespace gl
         skipButton.setVisible (running);
         saveButton.setVisible (done);
         discardButton.setVisible (done);
+        tryButton.setVisible (done);
+        tryLabel.setVisible (done && trying());
         autoToggle.setVisible (! done);
         autoDelay.setVisible (! done);
         cuesToggle.setVisible (! done);
@@ -405,8 +424,30 @@ namespace gl
             showPage (Page::Done);
     }
 
+    void CalibrationWizard::startTrying()
+    {
+        if (trying() || ! session.finished()) return;
+        proc.work.calTryBackup = proc.calibration;
+        proc.calibration = session.result();
+        proc.calibrating = false;           // track and send MIDI as normal, with the new calibration
+        proc.rebuildTracker();
+    }
+
+    void CalibrationWizard::stopTrying()
+    {
+        if (! trying()) return;
+        proc.calibration = *proc.work.calTryBackup;
+        proc.work.calTryBackup.reset();
+        startTracker();                     // back to the quiet wizard tracker
+    }
+
     void CalibrationWizard::finish (bool save)
     {
+        if (trying())
+        {
+            if (! save) proc.calibration = *proc.work.calTryBackup;
+            proc.work.calTryBackup.reset();
+        }
         if (save && session.finished())
             proc.calibration = session.result();
 
@@ -586,9 +627,35 @@ namespace gl
             }
 
             case Page::Done:
+            {
                 title.setText ("Calibration - done", juce::dontSendNotification);
                 body.setText (summary(), juce::dontSendNotification);
+                tryButton.setButtonText (trying() ? "Stop trying" : "Try it");
+                if (tryLabel.isVisible() != trying())
+                {
+                    tryLabel.setVisible (trying());
+                    resized();
+                }
+                if (trying())
+                {
+                    // The notes heard right now with the new calibration, and their chord name.
+                    std::vector<int> heard;
+                    for (int s = proc.instrument.numStrings() - 1; s >= 0; --s)
+                        if (const int f = proc.soundingFret[(size_t) s].load(); f >= 0)
+                            heard.push_back (proc.instrument.noteAt ({ s, f }));
+                    juce::String text ("Trying the new calibration: play something.");
+                    if (! heard.empty())
+                    {
+                        text = "Heard:";
+                        for (int n : heard) text << "  " << juce::String (midiNoteName (n));
+                        if (heard.size() >= 2)
+                            if (const auto names = nameChord (heard); ! names.empty())
+                                text << "   =   " << juce::String (names.front().name);
+                    }
+                    tryLabel.setText (text, juce::dontSendNotification);
+                }
                 break;
+            }
         }
     }
 
@@ -619,7 +686,7 @@ namespace gl
 
         auto buttons = r.removeFromBottom (30);
         for (auto* b : { &startButton, &fullButton, &listenButton, &acceptButton, &backButton, &skipButton, &endFretsButton,
-                         &saveButton, &discardButton, &cancelButton })
+                         &tryButton, &saveButton, &discardButton, &cancelButton })
             if (b->isVisible())
             {
                 b->setBounds (buttons.removeFromLeft (b == &startButton || b == &fullButton || b == &endFretsButton ? 210
@@ -641,6 +708,11 @@ namespace gl
         }
         else
         {
+            if (tryLabel.isVisible())
+            {
+                tryLabel.setBounds (r.removeFromTop (56));
+                r.removeFromTop (6);
+            }
             body.setBounds (r);
         }
     }

@@ -686,7 +686,8 @@ void GuitarLabProcessor::getStateInformation (juce::MemoryBlock& destData)
     extra.setProperty ("keyswitches", ks.joinIntoString (","), nullptr);
     extra.setProperty ("keyswitchChannel", midiSettings.keyswitchChannel, nullptr);
     extra.setProperty ("palmMuteCC", midiSettings.palmMuteCC, nullptr);
-    extra.setProperty ("calibration", juce::String (calibration.serialise()), nullptr);
+    // While a new calibration is only being tried, the project keeps the one from before.
+    extra.setProperty ("calibration", juce::String ((work.calTryBackup ? *work.calTryBackup : calibration).serialise()), nullptr);
     if (work.calOpen && work.calPage == 1) // a calibration in progress (wizard page "Running"): go on with it later
         extra.setProperty ("calibrationDraft", juce::String (work.calSession.saveDraft()), nullptr);
     extra.appendChild (uiState.createCopy(), nullptr);
