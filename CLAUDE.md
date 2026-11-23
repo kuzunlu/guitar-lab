@@ -119,6 +119,8 @@ Keep `Theory/`, `Midi/` and `Tracking/` free of JUCE, so they stay testable and 
   Keep it that way: an FFT on every hop for 8 strings is too expensive.
 - Mono chords: the single note starts at once (low latency); about 60 ms later, if the chroma matches a
   taught chord, the note is swapped for the whole shape. Do not delay single notes to wait for chords.
+- Mono legato: a pitch jump of 7+ half steps inside a ringing note must hold for 3 readings (~10 ms) before it becomes a
+  new note. Such jumps are mostly an overtone read for a moment; on real licks this removed ~70% of the too-high notes.
 - **Record guitar:** while `proc.recordingGuitar` is true, every tracker MIDI message is stamped with a beat
   and sent through `recordFifo` to `PhrasePanel`, which feeds `PhraseRecorder`. The clock is chosen once when
   recording starts: DAW / Play position if running (notes keep their place in the bar), else a free clock at

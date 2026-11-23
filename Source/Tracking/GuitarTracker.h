@@ -72,6 +72,8 @@ namespace gl
             float  envelope = 0.0f;
             int    quietFrames = 0;
             int    unclearFrames = 0;
+            int    jumpNote = -1;       // a big legato jump waiting to be confirmed
+            int    jumpCount = 0;
 
             int    note = -1;           // sounding MIDI note
             int    string = -1;
@@ -420,7 +422,18 @@ namespace gl
                 // Drift past the bend range = long slide: also a new legato note.
                 const bool legatoJump = jump > 0.75 && std::abs (dev) > 0.75;
                 const bool pastRange = std::abs (dev) > settings.bendRange - 0.5;
-                if (legatoJump || pastRange || (! settings.trackBends && std::abs (dev) > 0.6))
+                // A jump of 7+ half steps is often an overtone read for a moment (a real hammer-on that big is rare):
+                // it must hold for 3 readings (~10 ms) before the new note starts.
+                const bool wantChange = legatoJump || pastRange || (! settings.trackBends && std::abs (dev) > 0.6);
+                if (wantChange && std::abs (nearest - v.note) >= 7)
+                {
+                    v.jumpCount = nearest == v.jumpNote ? v.jumpCount + 1 : 1;
+                    v.jumpNote = nearest;
+                    if (v.jumpCount < 3) { v.lastMidi = v.note + v.smoothedDev; break; }
+                }
+                else
+                    v.jumpNote = -1;
+                if (wantChange)
                 {
                     const int oldNote = v.note, oldChannel = v.channel;
                     startNote (v, nearest, (float) r.peak, midi - nearest, offset, emit, true); // new note first (legato overlap)

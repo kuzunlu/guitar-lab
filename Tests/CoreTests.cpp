@@ -846,6 +846,26 @@ static void testTracker()
         check (gotB2, "hammer-on note is B2 (47)");
     }
 
+    // An overtone heard for a moment (A3 for 20 ms inside a ringing A2 = 2 readings) is not a new note...
+    {
+        GuitarTracker t;
+        t.prepare (kRate, 512, g, cal, s);
+        auto audio = pluck (0.7, [] (double tm) { return tm >= 0.3 && tm < 0.32 ? 220.0 : 110.0; }, 0.5, 0.8);
+        auto ev = runTracker (t, audio);
+        checkEq (count (ev, 0x90), 1, "a short overtone blip inside a note starts no new note");
+    }
+
+    // ...but a real big jump (a tap from A2 to A3) still is.
+    {
+        GuitarTracker t;
+        t.prepare (kRate, 512, g, cal, s);
+        auto audio = pluck (0.7, [] (double tm) { return tm < 0.3 ? 110.0 : 220.0; }, 0.5, 0.8);
+        auto ev = runTracker (t, audio);
+        bool gotA3 = false;
+        for (auto& e : ev) if ((e.status & 0xF0) == 0x90 && e.d1 == 57) gotA3 = true;
+        check (gotA3, "a tap an octave up gives the new note A3 (57)");
+    }
+
     // Hex mode: string index 1 (B string) on input channel 1 plays on MIDI channel 3.
     {
         TrackerSettings hs = s;
