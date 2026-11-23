@@ -244,6 +244,7 @@ namespace gl
         amount.setTooltip (amountLabel.getTooltip());
         addAndMakeVisible (amount);
 
+        theme::primary (reharmButton);
         reharmButton.setTooltip ("Reharmonize\nBuilds a new version of your progression using the ticked substitution kinds and the amount.\n"
                                  "Changed chords have a yellow border and show why they were chosen.");
         reharmButton.onClick = [this] { runReharm(); };

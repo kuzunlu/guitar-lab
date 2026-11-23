@@ -287,7 +287,7 @@ private:
     juce::AbstractFifo trackedFifo { 4096 };
     std::vector<TrackedEvent> trackedStore = std::vector<TrackedEvent> (4096);
     std::atomic<juce::int64> samplesProcessed { 0 };
-    static constexpr int kTunerRing = 1 << 18; // ~5 s at 48 kHz: a Full calibration copies each fret's note from it
+    static constexpr int kTunerRing = 1 << 19; // ~11 s at 48 kHz: a Full calibration copies each fret and chord from it
     std::vector<float> tunerRing = std::vector<float> ((size_t) kTunerRing);
     std::atomic<int> tunerWrite { 0 };
     bool   recordUsesTransport = false;

@@ -842,7 +842,9 @@ namespace gl
             // After a Full calibration, the scorer learned from this guitar decides instead of the rules above (it
             // knows its overtones much better). It sees every pitch with a little new energy.
             const bool learned = cal.net.usable() && cal.net.inputs == kNumNoteFeatures;
-            if ((learned || featureSink) && level > gateOn && (share > 0.3f * onShare || rising))
+            const bool waiting = sinceOnset < settings.waitFrames; // the player allowed more delay: decide later
+            if (waiting) ok = false;
+            else if ((learned || featureSink) && level > gateOn && (share > 0.3f * onShare || rising))
             {
                 float f[kNumNoteFeatures];
                 noteFeatures (p, share / onShare, rising, before, strongest, f);

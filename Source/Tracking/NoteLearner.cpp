@@ -54,25 +54,37 @@ namespace gl
         return span;
     }
 
-    void CalibrationAudio::put (int string, int fret, const float* samples, int count, double sampleRate)
+    namespace
     {
         // Keep ~24 kHz: plenty for Poly (it works at ~12 kHz) and a quarter of the size at 96 kHz.
-        const int factor = std::max (1, (int) (sampleRate / 22000.0));
-        const double newRate = sampleRate / factor;
-        if (! notes.empty() && std::abs (newRate - rate) > 1.0)
-            notes.clear(); // the audio device changed during the calibration: start again
-        rate = newRate;
-
-        Biquad lp1, lp2;
-        lp1.setLowPass (sampleRate, newRate * 0.45);
-        lp2.setLowPass (sampleRate, newRate * 0.45);
-        std::vector<float> down;
-        down.reserve ((size_t) (count / factor + 1));
-        for (int i = 0; i < count; ++i)
+        std::vector<float> downsample (const float* samples, int count, double sampleRate, double& newRate)
         {
-            const float v = lp2.process (lp1.process (samples[i]));
-            if (i % factor == 0) down.push_back (v);
+            const int factor = std::max (1, (int) (sampleRate / 22000.0));
+            newRate = sampleRate / factor;
+            Biquad lp1, lp2;
+            lp1.setLowPass (sampleRate, newRate * 0.45);
+            lp2.setLowPass (sampleRate, newRate * 0.45);
+            std::vector<float> down;
+            down.reserve ((size_t) (count / factor + 1));
+            for (int i = 0; i < count; ++i)
+            {
+                const float v = lp2.process (lp1.process (samples[i]));
+                if (i % factor == 0) down.push_back (v);
+            }
+            return down;
         }
+    }
+
+    void CalibrationAudio::put (int string, int fret, const float* samples, int count, double sampleRate)
+    {
+        double newRate = 0.0;
+        const auto down = downsample (samples, count, sampleRate, newRate);
+        if ((! notes.empty() || ! shapes.empty()) && std::abs (newRate - rate) > 1.0)
+        {
+            notes.clear(); // the audio device changed during the calibration: start again
+            shapes.clear();
+        }
+        rate = newRate;
 
         const auto span = findPick (down.data(), (int) down.size(), rate, 0.5);
         FretRecording r { string, fret, {} };
@@ -83,6 +95,21 @@ namespace gl
                      { return n.string == string && n.fret == fret; }), notes.end());
         if (! r.samples.empty())
             notes.push_back (std::move (r));
+    }
+
+    void CalibrationAudio::putShape (const std::vector<int>& frets, const float* samples, int count, double sampleRate)
+    {
+        double newRate = 0.0;
+        auto down = downsample (samples, count, sampleRate, newRate);
+        if ((! notes.empty() || ! shapes.empty()) && std::abs (newRate - rate) > 1.0)
+        {
+            notes.clear();
+            shapes.clear();
+        }
+        rate = newRate;
+        shapes.erase (std::remove_if (shapes.begin(), shapes.end(), [&] (const ShapeRecording& r) { return r.frets == frets; }),
+                      shapes.end());
+        shapes.push_back ({ frets, std::move (down) });
     }
 
     const FretRecording* CalibrationAudio::find (int string, int fret) const
@@ -104,7 +131,7 @@ namespace gl
         std::ofstream out (path, std::ios::binary);
         if (! out) return false;
         out.write (kMagic, 4);
-        writeValue<int32_t> (out, 1);
+        writeValue<int32_t> (out, 2);
         writeValue<double> (out, rate);
         writeValue<int32_t> (out, (int32_t) notes.size());
         for (const auto& n : notes)
@@ -118,6 +145,18 @@ namespace gl
             for (float v : n.samples)
                 writeValue<int16_t> (out, (int16_t) std::lround (std::clamp (v / peak, -1.0f, 1.0f) * 32767.0f));
         }
+        writeValue<int32_t> (out, (int32_t) shapes.size());
+        for (const auto& sh : shapes)
+        {
+            float peak = 1.0e-9f;
+            for (float v : sh.samples) peak = std::max (peak, std::abs (v));
+            writeValue<int32_t> (out, (int32_t) sh.frets.size());
+            for (int f : sh.frets) writeValue<int32_t> (out, f);
+            writeValue<int32_t> (out, (int32_t) sh.samples.size());
+            writeValue<float> (out, peak);
+            for (float v : sh.samples)
+                writeValue<int16_t> (out, (int16_t) std::lround (std::clamp (v / peak, -1.0f, 1.0f) * 32767.0f));
+        }
         return (bool) out;
     }
 
@@ -126,7 +165,7 @@ namespace gl
         std::ifstream in (path, std::ios::binary);
         char magic[4] {};
         int32_t version = 0, count = 0;
-        if (! in.read (magic, 4) || ! std::equal (magic, magic + 4, kMagic) || ! readValue (in, version) || version != 1)
+        if (! in.read (magic, 4) || ! std::equal (magic, magic + 4, kMagic) || ! readValue (in, version) || version < 1 || version > 2)
             return false;
         CalibrationAudio loaded;
         if (! readValue (in, loaded.rate) || ! readValue (in, count) || count < 0 || count > 10000) return false;
@@ -145,6 +184,26 @@ namespace gl
                 v = s / 32767.0f * peak;
             }
             loaded.notes.push_back (std::move (n));
+        }
+        int32_t shapeCount = 0;
+        if (version >= 2 && (! readValue (in, shapeCount) || shapeCount < 0 || shapeCount > 1000)) return false;
+        for (int32_t i = 0; i < shapeCount; ++i)
+        {
+            ShapeRecording sh;
+            int32_t strings = 0, length = 0;
+            float peak = 0.0f;
+            if (! readValue (in, strings) || strings < 0 || strings > 16) return false;
+            sh.frets.resize ((size_t) strings);
+            for (auto& f : sh.frets) { int32_t v = 0; if (! readValue (in, v)) return false; f = v; }
+            if (! readValue (in, length) || ! readValue (in, peak) || length < 0 || length > 50000000) return false;
+            sh.samples.resize ((size_t) length);
+            for (auto& v : sh.samples)
+            {
+                int16_t s = 0;
+                if (! readValue (in, s)) return false;
+                v = s / 32767.0f * peak;
+            }
+            loaded.shapes.push_back (std::move (sh));
         }
         *this = std::move (loaded);
         return true;
@@ -280,6 +339,53 @@ namespace gl
         return mix;
     }
 
+    std::vector<LearnMix> shapeMixes (const CalibrationAudio& audio, const Instrument& inst)
+    {
+        std::vector<LearnMix> out;
+        for (const auto& sh : audio.shapes)
+        {
+            // Every pick: loudness jumps to twice what it was in the 20 ms before, at least 150 ms after the last one.
+            const auto& x = sh.samples;
+            const int block = std::max (1, (int) (audio.rate * 0.005));
+            const int numBlocks = (int) x.size() / block;
+            std::vector<float> env ((size_t) std::max (0, numBlocks), 0.0f);
+            float loudest = 0.0f;
+            for (int b = 0; b < numBlocks; ++b)
+            {
+                double sq = 0.0;
+                for (int i = b * block; i < (b + 1) * block; ++i) sq += (double) x[(size_t) i] * x[(size_t) i];
+                env[(size_t) b] = (float) std::sqrt (sq / block);
+                loudest = std::max (loudest, env[(size_t) b]);
+            }
+            std::vector<double> picks;
+            int lastPick = -1000;
+            for (int b = 1; b < numBlocks; ++b)
+            {
+                float before = 1.0e-6f;
+                for (int k = std::max (0, b - 4); k < b; ++k) before = std::max (before, env[(size_t) k]);
+                if (env[(size_t) b] > 0.2f * loudest && env[(size_t) b] > 2.0f * before && b - lastPick >= 30)
+                {
+                    picks.push_back ((double) (b * block) / audio.rate);
+                    lastPick = b;
+                }
+            }
+            if (picks.empty()) continue;
+
+            LearnMix m;
+            m.audio = x;
+            m.rate = audio.rate;
+            const double end = (double) x.size() / audio.rate;
+            for (size_t k = 0; k < picks.size(); ++k)
+                for (int s = 0; s < (int) sh.frets.size() && s < inst.numStrings(); ++s)
+                    if (sh.frets[(size_t) s] >= 0)
+                        m.truth.push_back ({ picks[k], k + 1 < picks.size() ? picks[k + 1] : end,
+                                             inst.tuning()[(size_t) s] + sh.frets[(size_t) s], s, sh.frets[(size_t) s] });
+            std::sort (m.truth.begin(), m.truth.end(), [] (const MixNote& a, const MixNote& b) { return a.onset < b.onset; });
+            out.push_back (std::move (m));
+        }
+        return out;
+    }
+
     namespace
     {
         struct Example { std::array<float, PolyTracker::kNumNoteFeatures> f {}; bool real = false; float weight = 1.0f; };
@@ -288,11 +394,14 @@ namespace gl
         // Runs Poly over a mix. With `examples`, keeps what it knew about each possible new note, labelled by the mix.
         std::vector<Sent> listen (const LearnMix& mix, const Instrument& inst, const Calibration& cal,
                                   std::vector<Example>* examples, std::mt19937* rng, double keepFakes,
-                                  const std::function<bool (double)>& progress, double from, double to, bool& stopped)
+                                  const std::function<bool (double)>& progress, double from, double to, bool& stopped,
+                                  int stableFrames = 3, int waitFrames = 0)
         {
             TrackerSettings ts;
             ts.mode = TrackMode::Poly;
             ts.monoInput = 0;
+            ts.stableFrames = stableFrames;
+            ts.waitFrames = waitFrames;
             GuitarTracker tracker;
             tracker.prepare (mix.rate, 512, inst, cal, ts);
             double now = 0.0;
@@ -442,8 +551,10 @@ namespace gl
 
     NoteNet learnNoteNet (const CalibrationAudio& audio, const Instrument& inst, const Calibration& cal,
                           const std::function<bool (double)>& progress, const LearnSettings& ls,
-                          const std::vector<LearnMix>& playing)
+                          const std::vector<LearnMix>& extraPlaying)
     {
+        auto playing = shapeMixes (audio, inst);
+        playing.insert (playing.end(), extraPlaying.begin(), extraPlaying.end());
         // Too few recorded frets to make chords from: no scorer (Poly's rules decide).
         if (audio.rate <= 0.0 || audio.notes.size() < 24)
             return {};
@@ -455,17 +566,18 @@ namespace gl
         std::vector<Example> data;
 
         // Round 1: what Poly knows while its rules decide. Round 2: while the first scorer decides (its own mistakes).
-        listen (makeLearnMix (audio, inst, ls.seed + 100, ls.mixSeconds), inst, rules, &data, &rng, ls.keepFakes, progress, 0.0, 0.25, stopped);
+        const int sf = ls.stableFrames, wf = ls.waitFrames;
+        listen (makeLearnMix (audio, inst, ls.seed + 100, ls.mixSeconds), inst, rules, &data, &rng, ls.keepFakes, progress, 0.0, 0.25, stopped, sf, wf);
         for (const auto& p : playing)
-            if (! stopped) listen (p, inst, rules, &data, &rng, ls.keepFakes, {}, 0.0, 0.0, stopped);
+            if (! stopped) listen (p, inst, rules, &data, &rng, ls.keepFakes, {}, 0.0, 0.0, stopped, sf, wf);
         auto net = train (data, ls, ls.seed + 7, progress, 0.25, 0.35, stopped);
         Calibration withNet = cal;
         withNet.net = net;
         if (! stopped && net.usable())
         {
-            listen (makeLearnMix (audio, inst, ls.seed + 200, ls.mixSeconds), inst, withNet, &data, &rng, ls.keepFakes, progress, 0.35, 0.6, stopped);
+            listen (makeLearnMix (audio, inst, ls.seed + 200, ls.mixSeconds), inst, withNet, &data, &rng, ls.keepFakes, progress, 0.35, 0.6, stopped, sf, wf);
             for (const auto& p : playing)
-                if (! stopped) listen (p, inst, withNet, &data, &rng, ls.keepFakes, {}, 0.0, 0.0, stopped);
+                if (! stopped) listen (p, inst, withNet, &data, &rng, ls.keepFakes, {}, 0.0, 0.0, stopped, sf, wf);
         }
         if (! stopped)
             net = train (data, ls, ls.seed + 17, progress, 0.6, 0.75, stopped);
@@ -479,7 +591,7 @@ namespace gl
             withNet.net = net;
             withNet.net.offset = (float) offsets[i];
             const double from = 0.75 + 0.25 * (double) i / std::size (offsets), to = 0.75 + 0.25 * (double) (i + 1) / std::size (offsets);
-            const double v = value (check, listen (check, inst, withNet, nullptr, nullptr, 0.0, progress, from, to, stopped));
+            const double v = value (check, listen (check, inst, withNet, nullptr, nullptr, 0.0, progress, from, to, stopped, sf, wf));
             if (v > best) { best = v; bestOffset = offsets[i]; }
         }
         if (stopped || ! net.usable()) return {};

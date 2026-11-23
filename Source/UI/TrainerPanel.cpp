@@ -71,6 +71,7 @@ namespace gl
         heatToggle.onClick = [this] { if (onDisplayChanged) onDisplayChanged(); };
         addAndMakeVisible (heatToggle);
 
+        theme::primary (nextButton);
         nextButton.setTooltip ("Next question\nAsks a new question. Answer speed is measured from this moment.");
         nextButton.onClick = [this] { nextQuestion(); };
         addAndMakeVisible (nextButton);

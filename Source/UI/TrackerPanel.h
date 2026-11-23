@@ -104,15 +104,18 @@ namespace gl
         bool learning() const;                  // ...and is not finished yet (Save and Try it wait)
         Calibration newCalibration() const;     // the result, with what Poly learned
         bool trying() const { return proc.work.calTryBackup.has_value(); }
-        juce::ToggleButton autoToggle { "Auto listen" }, cuesToggle { "Sound cues" };
+        juce::ToggleButton autoToggle { "Auto listen" }, cuesToggle { "Sound cues" },
+                           extrasToggle { "Extra Poly practice (+5 min)" };
         juce::Slider autoDelay;
         void playCues();                        // a cue when listening starts, a step passes, or something is wrong
-        void captureFretAudio();                // Full calibration: keep the sound of each fret that was OK
+        void captureFretAudio();                // Full calibration: keep the sound of each fret and chord that was OK
         struct FretItem { int string = -1, fret = -1; };
         FretItem lastFretItem;                  // the fret being measured at the last tick (string -1 = no fret item)
+        std::vector<int> lastShape;             // ...or the chord shape (empty = no chord item)
         int  lastStepNumber = -1;
         bool lastListening = false;
-        struct PendingCapture { int string, fret; juce::uint32 at; };
+        juce::uint32 listenStartedAt = 0;
+        struct PendingCapture { int string, fret; std::vector<int> shape; juce::uint32 at, milliseconds; };
         std::vector<PendingCapture> pendingCaptures;
         std::vector<float> captureBuffer;
         int lastCuePhase = -1, lastCueStep = -1;

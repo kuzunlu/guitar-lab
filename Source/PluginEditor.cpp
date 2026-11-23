@@ -42,7 +42,7 @@ GuitarLabEditor::GuitarLabEditor (GuitarLabProcessor& p)
     tabs.getTabbedButtonBar().getTabButton (TrainerTab)->setTooltip (
         "Trainer\nQuizzes on note names, finding notes, arpeggios and intervals. Focus on any strings and frets "
         "(like only the 4th string, or past the 12th fret). It learns your weak spots.");
-    tabs.setTabBarDepth (28);
+    tabs.setTabBarDepth (34);
     tabs.onChange = [this]
     {
         proc.uiState.setProperty ("tab", currentTab(), nullptr);
@@ -387,5 +387,5 @@ void GuitarLabEditor::layoutPage()
     piano.setBounds (r.removeFromBottom (pianoHeight));
     fretboard.setBounds (r.removeFromTop (boardHeight));
     tabs.setBounds (r);
-    chordName.setBounds (r.getX() + r.getWidth() - 420, r.getY(), 412, 28); // empty end of the tab row
+    chordName.setBounds (r.getX() + r.getWidth() - 420, r.getY(), 412, tabs.getTabBarDepth()); // empty end of the tab row
 }

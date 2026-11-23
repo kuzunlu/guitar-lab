@@ -38,6 +38,7 @@ namespace gl
         std::string name;
         std::vector<int> frets;  // per string (index 0 = highest), -1 = not played
         Chroma chroma {};
+        bool learnOnly = false;  // Poly practice (octaves, fifths, double stops): Poly learns from it, it is no taught chord
     };
 
     // Learned from a Full calibration's recordings (NoteLearner): is a possible new Poly note real, or an overtone /
@@ -152,7 +153,8 @@ namespace gl
 
         // The instrument (tuning) must be chosen BEFORE starting.
         // full = also play every note on every string, and (mono mode) a set of chords.
-        void start (const Instrument& inst, bool hexMode, int numInputChannels, bool full = false);
+        // polyExtras (Full calibration, normal guitar): ~40 more shapes for Poly to learn from (polyExtraShapesFor).
+        void start (const Instrument& inst, bool hexMode, int numInputChannels, bool full = false, bool polyExtras = false);
 
         // Analysis frames. They only count while Listening.
         void feed (const AnalysisFrame& f, double hopSeconds);
@@ -196,6 +198,9 @@ namespace gl
 
         // Common chord shapes for this tuning (used by the chord step). Public for tests.
         static std::vector<ChordTemplate> chordShapesFor (const Instrument& inst);
+        // The shapes Poly mixes up most (one note on the other's overtones): octaves, fifths, octave + fifth, thirds and
+        // sixths, up the neck. Played like chords, learned from only.
+        static std::vector<ChordTemplate> polyExtraShapesFor (const Instrument& inst);
 
     private:
         struct PlanItem { Step step; int string; int fret = 0; }; // Chord: string = chord index

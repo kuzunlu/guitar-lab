@@ -34,6 +34,7 @@ namespace gl
             int    bendRange = 12;
             int    firstChannel = 2;
             double hysteresis = 0.0;   // 0..1: a pitch on an overtone of a louder, just-picked note needs up to 4x more energy (0 = off)
+            int    waitFrames = 0;     // after a pick, no new note for this many analyses (~11 ms each): later, surer decisions
         };
 
         // Allocates and builds the fingerprints: call from the message thread.

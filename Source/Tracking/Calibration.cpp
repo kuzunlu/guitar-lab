@@ -404,7 +404,43 @@ namespace gl
         return out;
     }
 
-    void CalibrationSession::start (const Instrument& i, bool hexMode, int numInputChannels, bool fullCalibration)
+    std::vector<ChordTemplate> CalibrationSession::polyExtraShapesFor (const Instrument& inst)
+    {
+        std::vector<ChordTemplate> out;
+        const int n = inst.numStrings();
+        // Two notes: `low` string at lowFret, and the note `interval` half steps higher on string `high`.
+        auto add = [&] (const std::string& kind, int low, int lowFret, int high, int interval)
+        {
+            if (low < 0 || low >= n || high < 0 || high >= n) return;
+            const int root = inst.tuning()[(size_t) low] + lowFret;
+            const int highFret = root + interval - inst.tuning()[(size_t) high];
+            if (highFret < 0 || highFret > kNumFrets || std::abs (highFret - lowFret) > 4) return;
+            std::vector<int> frets ((size_t) n, -1);
+            frets[(size_t) low] = lowFret;
+            frets[(size_t) high] = highFret;
+            out.push_back ({ pitchClassName (root % 12) + " " + kind, frets, {}, true });
+        };
+        for (int low : { n - 1, n - 2, n - 3 })           // octaves: the usual shape, two strings apart
+            for (int fret : { 0, 3, 7, 10 })
+                add ("octave", low, fret, low - 2, 12);
+        for (int low : { n - 1, n - 2, n - 3 })           // fifths on neighbouring strings
+            for (int fret : { 0, 5, 8 })
+                add ("fifth", low, fret, low - 1, 7);
+        for (int low : { n - 1, n - 2 })                  // octave + fifth (the 3rd overtone), three strings apart
+            for (int fret : { 0, 3, 5 })
+                add ("12th", low, fret, low - 3, 19);
+        for (int fret : { 2, 5, 9 })                      // double stops on the higher strings
+        {
+            add ("major 3rd", 2, fret, 1, 4);
+            add ("minor 3rd", 2, fret, 1, 3);
+            add ("major 6th", 3, fret, 1, 9);
+            add ("minor 6th", 3, fret, 1, 8);
+        }
+        return out;
+    }
+
+    void CalibrationSession::start (const Instrument& i, bool hexMode, int numInputChannels, bool fullCalibration,
+                                    bool polyExtras)
     {
         inst = i;
         cal = Calibration {};
@@ -433,6 +469,8 @@ namespace gl
             if (! hexMode)
             {
                 chordList = chordShapesFor (inst);
+                if (polyExtras)
+                    for (auto& x : polyExtraShapesFor (inst)) chordList.push_back (x);
                 for (int c = 0; c < (int) chordList.size(); ++c)
                     plan.push_back ({ Step::Chord, c });
             }
@@ -557,6 +595,10 @@ namespace gl
         bleedSum = bSum;
         bleedCount = bCount;
         chordList = full && ! cal.hexMode ? chordShapesFor (inst) : std::vector<ChordTemplate> {};
+        bool extras = false; // the plan goes past the chords: it was started with the Poly practice shapes
+        for (const auto& it : plan) if (it.step == Step::Chord && it.string >= (int) chordList.size()) extras = true;
+        if (extras)
+            for (auto& x : polyExtraShapesFor (inst)) chordList.push_back (x);
         previousNote = -1;
         history.clear();
         stepIndex = backLimit = index;
@@ -633,6 +675,9 @@ namespace gl
                     std::string shape;
                     for (int s = (int) ch->frets.size() - 1; s >= 0; --s)
                         shape += (ch->frets[(size_t) s] < 0 ? std::string ("x") : std::to_string (ch->frets[(size_t) s])) + (s > 0 ? " " : "");
+                    if (ch->learnOnly)
+                        return "Play " + ch->name + " 3 times: both notes together (shape, low to high: " + shape
+                             + " - shown on the fretboard). Mute the other strings. Let it ring a moment each time.";
                     return "Strum " + ch->name + " 3 times (shape, low to high: " + shape
                          + " - shown on the fretboard). Let it ring a moment each time.";
                 }
@@ -768,7 +813,7 @@ namespace gl
             {
                 auto t = *ch;
                 t.chroma = meanChroma (chromas);
-                cal.chords.push_back (t);
+                if (! ch->learnOnly) cal.chords.push_back (t);
                 say ("OK: " + ch->name + " kept.", true);
             }
             finishStep();
@@ -1003,7 +1048,7 @@ namespace gl
 
         auto t = *ch;
         t.chroma = heard;
-        cal.chords.push_back (t);
+        if (! ch->learnOnly) cal.chords.push_back (t); // Poly practice shapes are no taught chords (Mono)
         say ("OK: " + ch->name + " learned.", true);
         finishStep();
     }

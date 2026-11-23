@@ -217,6 +217,13 @@ namespace gl
             "You can stop a step with Skip at any time. Save the result as a preset afterwards (Saved calibrations).");
         fullButton.onClick = [this] { startListening (true); };
 
+        extrasToggle.setTooltip ("Extra Poly practice (Full calibration, about 5 minutes more)\n"
+            "Adds about 40 short steps at the end: octaves, fifths, octave + fifth, and two-note shapes (thirds and "
+            "sixths) up the neck, each played 3 times. These are the shapes Poly mixes up most often, because one note "
+            "sits on the other's overtones. Poly learns from them together with the frets and the chords.\n"
+            "Only for a normal guitar (not a hex pickup). Mono does not use them.");
+        addChildComponent (extrasToggle);
+
         endFretsButton.setTooltip ("My guitar ends here\nPress this when the fret asked for does not exist on your guitar "
                                    "(for example fret 23 on a 22-fret guitar). The tracker will never guess frets past this one, "
                                    "on any string.");
@@ -225,6 +232,7 @@ namespace gl
         cancelButton.setTooltip ("Cancel\nStops calibration. Your old calibration (if any) is kept.");
         cancelButton.onClick = [this] { finish (false); };
 
+        theme::primary (listenButton);
         listenButton.setTooltip ("Listen (Space bar or Enter)\nPress it, then play what is shown above. Guitar Lab listens only "
                                  "after this press, and only to a NEW note: a string that still rings from before does not count. "
                                  "When it heard the right thing it says OK and shows the next step; press Listen again for it.\n"
@@ -262,6 +270,7 @@ namespace gl
         memory.remember (autoToggle, "autoListen");
         memory.remember (autoDelay, "autoDelay");
         memory.remember (cuesToggle, "soundCues");
+        memory.remember (extrasToggle, "polyExtras");
 
         backButton.setTooltip ("Back\nGo back one step, for example when you played the wrong thing and it was still accepted. "
                                "The result of that step is forgotten; press Listen and play it again. Press Back more times "
@@ -294,12 +303,14 @@ namespace gl
         tryLabel.setColour (juce::Label::textColourId, theme::sounding);
         addChildComponent (tryLabel);
 
+        theme::primary (saveButton);
         saveButton.setTooltip ("Save calibration\nUse these results for tracking from now on. They are saved with your project.");
         saveButton.onClick = [this] { finish (true); };
 
         discardButton.setTooltip ("Discard\nThrow these results away and keep the previous calibration.");
         discardButton.onClick = [this] { finish (false); };
 
+        theme::primary (finishButton);
         finishButton.setTooltip ("Finish\nEverything was played right: show the results. After a Full calibration, Poly mode "
                                  "then learns your guitar's sound (1-2 minutes).\n"
                                  "If the last thing you played went wrong, press Back instead and play it again.");
@@ -387,6 +398,7 @@ namespace gl
 
         startButton.setVisible (tuningPage);
         fullButton.setVisible (tuningPage);
+        extrasToggle.setVisible (tuningPage);
         endFretsButton.setVisible (false); // shown by tick() during "every note"
         cancelButton.setVisible (! done);
         listenButton.setVisible (running);
@@ -419,7 +431,8 @@ namespace gl
             return;
 
         startTracker();
-        session.start (proc.instrument, hexMode (proc), std::max (1, proc.numGuitarInputs()), full);
+        session.start (proc.instrument, hexMode (proc), std::max (1, proc.numGuitarInputs()), full,
+                       full && extrasToggle.getToggleState());
         proc.work.calLearning.reset();
         proc.work.calAudio.clear();
         pendingCaptures.clear();
@@ -598,21 +611,30 @@ namespace gl
 
     void CalibrationWizard::captureFretAudio()
     {
-        // A fret of a Full calibration passed (it was listening, and the next item came): copy its sound 0.6 s later,
-        // so the recording holds the pick and most of the note. The input is copied while calibrating (tunerRing).
+        // A fret or chord of a Full calibration passed (it was listening, and the next item came): copy its sound 0.6 s
+        // later, so the recording holds the pick(s) and most of the sound. The input is copied while calibrating
+        // (tunerRing). A fret keeps 2 s, a chord everything since Listen (its 3 strums).
         const auto now = juce::Time::getMillisecondCounter();
         const int step = session.stepNumber();
-        if (page == Page::Running && lastListening && step == lastStepNumber + 1 && lastFretItem.string >= 0)
-            pendingCaptures.push_back ({ lastFretItem.string, lastFretItem.fret, now + 600 });
+        if (session.isListening() && ! lastListening)
+            listenStartedAt = now;
+        if (lastListening && step == lastStepNumber + 1)
+        {
+            if (lastFretItem.string >= 0)
+                pendingCaptures.push_back ({ lastFretItem.string, lastFretItem.fret, {}, now + 600, 2000 });
+            else if (! lastShape.empty())
+                pendingCaptures.push_back ({ -1, -1, lastShape, now + 600, now - listenStartedAt + 600 });
+        }
 
         const double rate = proc.getSampleRate() > 0.0 ? proc.getSampleRate() : 48000.0;
         for (auto it = pendingCaptures.begin(); it != pendingCaptures.end();)
         {
             if ((juce::int32) (now - it->at) < 0) { ++it; continue; }
-            const int count = std::min (GuitarLabProcessor::tunerRingSize(), (int) (2.0 * rate));
+            const int count = std::min (GuitarLabProcessor::tunerRingSize(), (int) (it->milliseconds / 1000.0 * rate));
             captureBuffer.resize ((size_t) count);
             proc.readTunerInput (captureBuffer.data(), count);
-            proc.work.calAudio.put (it->string, it->fret, captureBuffer.data(), count, rate);
+            if (it->shape.empty()) proc.work.calAudio.put (it->string, it->fret, captureBuffer.data(), count, rate);
+            else                   proc.work.calAudio.putShape (it->shape, captureBuffer.data(), count, rate);
             it = pendingCaptures.erase (it);
         }
 
@@ -620,6 +642,8 @@ namespace gl
         lastListening = session.isListening();
         const bool fretItem = session.step() == CalibrationSession::Step::EveryNote && session.expectedFret() >= 0;
         lastFretItem = fretItem ? FretItem { session.currentString(), session.expectedFret() } : FretItem {};
+        const auto* chord = session.step() == CalibrationSession::Step::Chord ? session.currentChord() : nullptr;
+        lastShape = chord != nullptr ? chord->frets : std::vector<int> {};
     }
 
     void CalibrationWizard::tick()
@@ -763,7 +787,7 @@ namespace gl
 
     void CalibrationWizard::paint (juce::Graphics& g)
     {
-        g.fillAll (theme::background.withAlpha (0.97f));
+        g.fillAll (theme::background);
         g.setColour (theme::accent.withAlpha (0.5f));
         g.drawRect (getLocalBounds(), 1);
 
@@ -787,11 +811,15 @@ namespace gl
         title.setBounds (top);
 
         auto buttons = r.removeFromBottom (30);
-        for (auto* b : { &startButton, &fullButton, &listenButton, &acceptButton, &backButton, &skipButton, &endFretsButton,
-                         &finishButton, &tryButton, &saveButton, &discardButton, &cancelButton })
+        for (juce::Button* b : { (juce::Button*) &startButton, (juce::Button*) &fullButton, (juce::Button*) &extrasToggle,
+                                 (juce::Button*) &listenButton, (juce::Button*) &acceptButton, (juce::Button*) &backButton,
+                                 (juce::Button*) &skipButton, (juce::Button*) &endFretsButton, (juce::Button*) &finishButton,
+                                 (juce::Button*) &tryButton, (juce::Button*) &saveButton, (juce::Button*) &discardButton,
+                                 (juce::Button*) &cancelButton })
             if (b->isVisible())
             {
-                b->setBounds (buttons.removeFromLeft (b == &startButton || b == &fullButton || b == &endFretsButton ? 210
+                b->setBounds (buttons.removeFromLeft (b == &startButton || b == &fullButton || b == &endFretsButton
+                                                          || b == &extrasToggle ? 210
                                                       : (b == &listenButton ? 160 : 120)));
                 buttons.removeFromLeft (8);
             }
@@ -934,6 +962,7 @@ namespace gl
         addAndMakeVisible (soundToggle);
         soundAtt = std::make_unique<APVTS::ButtonAttachment> (proc.params, ParamIDs::synthOn, soundToggle);
 
+        theme::primary (calibrateButton);
         calibrateButton.setTooltip ("Calibrate\n"
             "Teaches the tracker YOUR guitar. First it asks for your tuning, then it listens while you:\n"
             "  1. stay quiet (to learn the noise level),\n"
@@ -1397,7 +1426,8 @@ namespace gl
         put (b, calibrateButton, 110);
         put (b, intonationButton, 100);
         put (b, tunerButton, 80);
-        calStatus.setBounds (b);
+
+        calStatus.setBounds (row (20)); // its own line: the text can be long
 
         auto c = row();
         put (c, presetLabel, 130);       put (c, presetBox, 260);

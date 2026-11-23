@@ -166,7 +166,12 @@ Keep `Theory/`, `Midi/` and `Tracking/` free of JUCE, so they stay testable and 
   another mix ("balanced" = best found-minus-wrong + 1). It runs on a thread in `proc.work.calLearning` (1-2 min);
   Save / Try it wait for it. Benchmark (IDMT, `tools/benchmark --detail learn3`): chord licks 74.3% / 76 wrong ->
   76.5% / 22.5, single-note licks 89.1% / 67 -> 92.1% / 41, ~5 ms faster. Without such a calibration nothing changes.
-  The learning uses default tracker settings; the scorer only fits the guitar and setup it was learned on. Strings: a small search
+  The learning uses default tracker settings; the scorer only fits the guitar and setup it was learned on.
+  It also learns from the calibration's chord steps: `captureFretAudio` keeps each chord's audio since Listen
+  (`CalibrationAudio::shapes`, file version 2) and `shapeMixes` turns every strum into known notes. **Extra Poly
+  practice** (wizard switch, `polyExtraShapesFor`, ~39 steps): octaves, fifths, 12ths, thirds and sixths, played like
+  chords; `ChordTemplate::learnOnly` keeps them out of `cal.chords` (Mono would turn single notes into octaves).
+  A draft whose plan goes past the normal chords gets the practice shapes back when loaded. Strings: a small search
   (`startNotes`) - one note per string, hand span, near the hand, notes of the same strum may move string.
   In a strum of 3+ notes, `completeChord` adds octave notes hidden in a known shape (common shapes + taught chords)
   as soon as a new note starts (and again at ~75 and ~130 ms); when the pitches fit a shape exactly, notes move to
@@ -205,6 +210,9 @@ Keep `Theory/`, `Midi/` and `Tracking/` free of JUCE, so they stay testable and 
   into `tunerRing` ONLY while `proc.tunerOn` is true (tuner open). The tuner runs its own YIN on every screen refresh
   (`VBlankAttachment`) and smooths the cents; closed, it costs nothing. **Note log** (`NoteLogView`): every tracker
   note-on/off goes through `trackedFifo` (`popTrackedEvents`), drained by `TrackerPanel::timerTick`.
+- **Look (`UI/Theme.h`, one `LookAndFeel` for all tabs):** rounded flat buttons and boxes, calm check boxes, a tab row
+  where the open tab is bold and underlined. `theme::primary (button)` fills a button with the accent colour: use it
+  only for the one or two main actions of a tab (Calibrate, Listen, Play, Reharmonize, Next...), so the eye finds them.
 - **Every control needs a detailed tooltip.** First line = short title (shown bold), then plain-English lines
   that explain what it does and when to use it. Components that change by hover (fretboard, piano, tab view,
   chord cards) implement `getTooltip()` to describe what is under the mouse.

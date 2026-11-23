@@ -1614,6 +1614,65 @@ static void testNoteLearner()
     check (! learnNoteNet (few, g, polyTestCalibration(), {}, quick).usable(), "note learner: too few frets, no scorer");
 }
 
+static void testPolyPractice()
+{
+    // Poly practice shapes: two notes, the right interval, learned from only (never a taught chord).
+    Instrument g;
+    const auto extras = CalibrationSession::polyExtraShapesFor (g);
+    check (extras.size() >= 30, "poly practice: about 40 shapes (got " + std::to_string (extras.size()) + ")");
+    bool allOk = true;
+    for (const auto& x : extras)
+    {
+        std::vector<int> notes;
+        for (int s = 0; s < (int) x.frets.size(); ++s)
+            if (x.frets[(size_t) s] >= 0) notes.push_back (g.tuning()[(size_t) s] + x.frets[(size_t) s]);
+        std::sort (notes.begin(), notes.end());
+        const int d = notes.size() == 2 ? notes[1] - notes[0] : -1;
+        if (! x.learnOnly || ! (d == 12 || d == 7 || d == 19 || d == 3 || d == 4 || d == 8 || d == 9)) allOk = false;
+    }
+    check (allOk, "poly practice: two notes each, an octave / fifth / 12th / third / sixth, learn only");
+
+    CalibrationSession plain, more;
+    plain.start (g, false, 1, true);
+    more.start (g, false, 1, true, true);
+    checkEq (more.totalSteps() - plain.totalSteps(), (int) extras.size(), "poly practice: the switch adds its steps");
+    CalibrationSession hex;
+    hex.start (g, true, 6, true, true);
+    CalibrationSession hexPlain;
+    hexPlain.start (g, true, 6, true);
+    checkEq (hex.totalSteps(), hexPlain.totalSteps(), "poly practice: not for a hex pickup");
+    CalibrationSession back;
+    check (back.loadDraft (more.saveDraft()) && back.totalSteps() == more.totalSteps(), "poly practice: a draft keeps the steps");
+
+    // A recorded chord step: three strums of the shape become examples with known notes.
+    std::vector<int> frets { 0, 1, 0, 2, 3, -1 }; // C major, high string first
+    std::vector<float> audio = silenceOf (0.3);
+    for (int k = 0; k < 3; ++k)
+    {
+        std::vector<float> strumAudio = silenceOf (1.0);
+        for (int s = 0; s < 6; ++s)
+            if (frets[(size_t) s] >= 0)
+            {
+                const double hz = midiToHz (g.tuning()[(size_t) s] + frets[(size_t) s]);
+                const auto one = pluck (1.0, [hz] (double) { return hz; }, 0.12, 2.0);
+                for (size_t i = 0; i < one.size(); ++i) strumAudio[i] += one[i];
+            }
+        append (audio, strumAudio);
+    }
+    CalibrationAudio ca;
+    ca.putShape (frets, audio.data(), (int) audio.size(), kRate);
+    ca.putShape (frets, audio.data(), (int) audio.size(), kRate);
+    checkEq ((int) ca.shapes.size(), 1, "poly practice: one recording per shape");
+    const auto file = std::filesystem::temp_directory_path() / "guitar-lab-test-shapes.glaudio";
+    CalibrationAudio loaded;
+    check (ca.save (file) && loaded.load (file) && loaded.shapes.size() == 1 && loaded.shapes[0].frets == frets,
+           "poly practice: shape recordings save and load");
+    std::filesystem::remove (file);
+    const auto mixes = shapeMixes (loaded, g);
+    check (mixes.size() == 1 && mixes[0].truth.size() == 3 * 5, "poly practice: 3 strums x 5 notes found (got "
+           + std::to_string (mixes.empty() ? 0 : (int) mixes[0].truth.size()) + ")");
+}
+
 static void testPolyTracking()
 {
     // Single note: one note, then a note-off in the silence.
@@ -1965,6 +2024,7 @@ int main()
     testSetupPreset();
     testCalibrationAudio();
     testNoteLearner();
+    testPolyPractice();
     testCalibrationHints();
     testTimbreString();
     testChordTracking();

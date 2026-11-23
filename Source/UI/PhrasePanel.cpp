@@ -523,6 +523,7 @@ namespace gl
         clearButton.onClick = [this] { pushUndo(); proc.phrase.clear(); tab.selected = -1; tab.cursor = 0; commit(); };
         addAndMakeVisible (clearButton);
 
+        theme::primary (playButton);
         playButton.setTooltip ("Play / Stop\nPlays the phrase in a loop with Guitar Lab's own clock, at the internal tempo "
                                "(set in MIDI / Sound settings).\nWhen 'Sync to host' is on, the phrase ALSO plays whenever the DAW plays.");
         playButton.onClick = [this] { proc.setInternalPlaying (! proc.isInternalPlaying()); };

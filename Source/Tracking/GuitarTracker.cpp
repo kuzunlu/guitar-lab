@@ -23,7 +23,7 @@ namespace gl
         if (settings.mode == TrackMode::Poly)
             poly.prepare (sampleRate, inst, cal, { settings.stableFrames, settings.sensitivity, settings.trackBends,
                                                    settings.bendRange, settings.firstChannel,
-                                                   std::clamp (settings.hysteresis, 0.0, 1.0) });
+                                                   std::clamp (settings.hysteresis, 0.0, 1.0), std::clamp (settings.waitFrames, 0, 10) });
 
         if (settings.mode != TrackMode::Hex)
         {
