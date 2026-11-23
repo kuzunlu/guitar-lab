@@ -7,6 +7,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 namespace gl
@@ -38,6 +39,12 @@ namespace gl
         // Allocates and builds the fingerprints: call from the message thread.
         void prepare (double sampleRate, const Instrument& inst, const Calibration& cal, const Settings& settings);
         void reset();
+
+        // What Poly knows about each possible new note (NoteLearner learns from it). Only for learning: never on the
+        // audio thread of the plugin. (midi, features, kNumNoteFeatures, the rules would start it)
+        static constexpr int kNumNoteFeatures = 40;
+        using FeatureSink = std::function<void (int midi, const float* features, int count, bool rulesSayYes)>;
+        void setFeatureSink (FeatureSink sink) { featureSink = std::move (sink); }
 
         // The one-note pitch detector's reading at an input sample (counted since reset): the note it hears and how
         // clear it is. Given in time order, before process() reaches that sample.
@@ -219,5 +226,11 @@ namespace gl
         int64_t samplesIn = 0;
         int clearNote = -1, clearRun = 0;     // the note heard clearly, and for how many readings in a row
         bool overtoneOfClearNote (int p) const;
+
+        // The learned scorer (cal.net, from a Full calibration): its features, and the short spectra of the last 4 analyses.
+        FeatureSink featureSink;
+        void noteFeatures (int p, float shareRel, bool rising, float before, float strongest, float* f) const;
+        std::array<std::vector<float>, 4> shortHist;
+        int shortPos = 0;
     };
 }

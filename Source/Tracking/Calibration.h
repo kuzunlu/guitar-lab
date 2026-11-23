@@ -40,6 +40,18 @@ namespace gl
         Chroma chroma {};
     };
 
+    // Learned from a Full calibration's recordings (NoteLearner): is a possible new Poly note real, or an overtone /
+    // a guess? A small neural network: one hidden layer (tanh), a score > 0 = real. Empty = Poly's rules decide.
+    struct NoteNet
+    {
+        int inputs = 0, hidden = 0;
+        std::vector<float> mean, scale, w1, b1, w2;  // w1: hidden x inputs
+        float b2 = 0.0f, offset = 0.0f;              // offset: how strict (set when learning: "balanced")
+
+        bool usable() const;
+        float score (const float* features) const;
+    };
+
     struct Calibration
     {
         bool valid = false;
@@ -87,6 +99,8 @@ namespace gl
 
         // Total cents correction for a string (whole-guitar offset + this string's own offset).
         double centsFor (int string) const;
+
+        NoteNet net;    // learned from the Full calibration's recordings (empty = none)
 
         std::string serialise() const;
         void deserialise (const std::string& text);

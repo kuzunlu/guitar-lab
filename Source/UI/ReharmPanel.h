@@ -5,6 +5,7 @@
 #include "Theory/Voicing.h"
 #include "UI/FretboardComponent.h"
 #include "UI/PianoComponent.h"
+#include "UI/ShapesPanel.h"
 #include "UI/Theme.h"
 #include "UI/UiMemory.h"
 
@@ -21,15 +22,19 @@ namespace gl
         juce::String title;
         std::function<void (int)> onClick;                                  // -1 = empty space
         std::function<void (const std::vector<double>&)> onLengthsChanged;  // new beats per chord, after a drag
+        std::function<void (int)> onHover;                                  // the card under the mouse changed (-1 = none)
+        juce::Rectangle<int> cardArea (int i) const { return cardBounds (i).toNearestInt(); }
 
         void paint (juce::Graphics&) override;
         void mouseDown (const juce::MouseEvent&) override;
         void mouseDrag (const juce::MouseEvent&) override;
         void mouseUp (const juce::MouseEvent&) override;
         void mouseMove (const juce::MouseEvent&) override;
+        void mouseExit (const juce::MouseEvent&) override;
         juce::String getTooltip() override;
 
     private:
+        int hovered = -1;
         juce::Rectangle<float> cardBounds (int i) const;
         int cardAt (juce::Point<float> p) const;
         int edgeAt (juce::Point<float> p) const;    // card whose right edge is under the mouse, -1 = none
@@ -84,6 +89,7 @@ namespace gl
         void updateView();              // strips, suggestion list and fretboard for the current result
         juce::String workKey() const;   // input, key and tuning: the saved result only fits these
         void selectCard (bool resultRow, int index);
+        void showHoverShape (bool resultRow, int index); // the chord diagram of the card under the mouse (-1 = hide)
         void nextVoicing();
         void playVoicing (const Voicing& v);
         void sendToPhrase();
@@ -118,6 +124,7 @@ namespace gl
         unsigned& seed = proc.work.reharmSeed;
         int liveString = -1;
         int playToken = 0;
+        ShapeGrid hoverShape;                    // pops up next to the chord card under the mouse
         UiMemory memory { proc.uiState, "Reharm" }; // last member: see UiMemory
     };
 }

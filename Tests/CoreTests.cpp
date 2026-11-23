@@ -9,9 +9,11 @@
 #include "Theory/Trainer.h"
 #include "Theory/Voicing.h"
 #include "Tracking/GuitarTracker.h"
+#include "Tracking/NoteLearner.h"
 
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <set>
 #include <string>
 
@@ -1212,6 +1214,47 @@ static void testFullCalibration()
            "attack fingerprints survive save/load");
 }
 
+static void testCalibrationAudio()
+{
+    // The wizard copies 2 s around each fret: the tail of the fret before, the pick, the note, maybe the next pick.
+    auto audio = pluck (0.7, [] (double) { return 110.0; }, 0.05, 4.0);  // quiet tail of the note before
+    append (audio, pluck (1.0, [] (double) { return 123.47; }, 0.5, 1.5)); // the pick at 0.7 s
+    append (audio, pluck (0.3, [] (double) { return 130.81; }, 0.5, 1.5)); // the next pick at 1.7 s
+    CalibrationAudio ca;
+    ca.put (5, 2, audio.data(), (int) audio.size(), kRate);
+    const auto* r = ca.find (5, 2);
+    check (r != nullptr && std::abs (ca.rate - 24000.0) < 1.0, "calibration audio: stored at ~24 kHz");
+    if (r != nullptr)
+    {
+        const double seconds = r->samples.size() / ca.rate;
+        check (seconds > 0.9 && seconds < 1.05, "calibration audio: from just before the pick to the next pick (got "
+                                                 + std::to_string (seconds) + " s)");
+        float early = 0.0f, later = 0.0f;
+        for (size_t i = 0; i < (size_t) (0.015 * ca.rate); ++i) early = std::max (early, std::abs (r->samples[i]));
+        for (size_t i = (size_t) (0.02 * ca.rate); i < (size_t) (0.04 * ca.rate); ++i) later = std::max (later, std::abs (r->samples[i]));
+        check (later > 3.0f * early, "calibration audio: the pick is ~20 ms in");
+    }
+
+    const auto first = r != nullptr ? r->samples : std::vector<float> {};
+    ca.put (5, 2, audio.data(), (int) audio.size(), kRate); // r is gone now (replaced)
+    checkEq ((int) ca.notes.size(), 1, "calibration audio: one recording per string and fret");
+    const auto quiet = silenceOf (2.0);
+    ca.put (4, 0, quiet.data(), (int) quiet.size(), kRate);
+    check (ca.find (4, 0) == nullptr, "calibration audio: no pick, nothing stored");
+
+    const auto file = std::filesystem::temp_directory_path() / "guitar-lab-test.glaudio";
+    CalibrationAudio back;
+    check (ca.save (file) && back.load (file), "calibration audio: saves and loads");
+    check (back.notes.size() == 1 && back.notes[0].samples.size() == first.size() && std::abs (back.rate - ca.rate) < 1e-9,
+           "calibration audio: same notes after loading");
+    float worst = first.empty() ? 1.0f : 0.0f;
+    for (size_t i = 0; ! back.notes.empty() && i < back.notes[0].samples.size() && i < first.size(); ++i)
+        worst = std::max (worst, std::abs (back.notes[0].samples[i] - first[i]));
+    check (worst < 1.0e-3f, "calibration audio: 16-bit samples are close");
+    std::filesystem::remove (file);
+    check (! back.load (file), "calibration audio: a missing file does not load");
+}
+
 static void testSetupPreset()
 {
     // A preset holds the settings, the tuning and the calibration; old preset files are a bare calibration.
@@ -1503,6 +1546,72 @@ namespace
         for (auto& e : ev) if ((e.status & 0xF0) == 0x90 && e.d2 > 0 && e.d1 == note) ch = (e.status & 0x0F) + 1;
         return ch;
     }
+}
+
+static void testNoteLearner()
+{
+    // The learned scorer is part of the calibration text.
+    {
+        Calibration cal;
+        cal.valid = true;
+        NoteNet& net = cal.net;
+        net.inputs = PolyTracker::kNumNoteFeatures;
+        net.hidden = 2;
+        net.mean.assign ((size_t) net.inputs, 0.5f);
+        net.scale.assign ((size_t) net.inputs, 2.0f);
+        net.w1.resize ((size_t) (net.inputs * net.hidden));
+        for (size_t i = 0; i < net.w1.size(); ++i) net.w1[i] = 0.01f * (float) ((int) (i % 7) - 3);
+        net.b1 = { 0.1f, -0.2f };
+        net.w2 = { 1.5f, -0.75f };
+        net.b2 = 0.25f;
+        net.offset = 1.0f;
+        std::vector<float> f ((size_t) net.inputs);
+        for (size_t i = 0; i < f.size(); ++i) f[i] = (float) i * 0.1f;
+        Calibration back;
+        back.deserialise (cal.serialise());
+        check (back.net.usable() && std::abs (back.net.score (f.data()) - net.score (f.data())) < 1.0e-3f,
+               "note scorer: saved with the calibration, same score after loading");
+        Calibration none;
+        none.deserialise (Calibration {}.serialise());
+        check (! none.net.usable(), "note scorer: a calibration without one has none");
+    }
+
+    // Learning from recorded frets (plucks for every fret up to 12 on every string).
+    Instrument g;
+    CalibrationAudio audio;
+    for (int str = 0; str < g.numStrings(); ++str)
+        for (int fret = 0; fret <= 12; ++fret)
+        {
+            const double hz = midiToHz (g.tuning()[(size_t) str] + fret);
+            auto a = silenceOf (0.3);
+            append (a, pluck (1.2, [hz] (double) { return hz; }, 0.4, 2.0 + 0.1 * fret));
+            audio.put (str, fret, a.data(), (int) a.size(), kRate);
+        }
+    checkEq ((int) audio.notes.size(), 6 * 13, "note learner: every fret recorded");
+
+    const auto mix = makeLearnMix (audio, g, 5u, 20.0);
+    check (! mix.truth.empty() && mix.audio.size() > (size_t) (19.0 * mix.rate), "note learner: a mix with known notes");
+    bool truthOk = true;
+    for (const auto& n : mix.truth) if (n.pitch != g.tuning()[(size_t) n.string] + n.fret || n.offset <= n.onset) truthOk = false;
+    check (truthOk, "note learner: the mix's notes are right");
+
+    LearnSettings quick;
+    quick.mixSeconds = 20.0;
+    quick.checkSeconds = 8.0;
+    quick.epochs = 3;
+    quick.hidden = 8;
+    double lastProgress = 0.0;
+    const auto net = learnNoteNet (audio, g, polyTestCalibration(), [&] (double p) { lastProgress = p; return true; }, quick);
+    check (net.usable() && net.hidden == 8 && net.inputs == PolyTracker::kNumNoteFeatures, "note learner: learns a usable scorer");
+    check (std::abs (lastProgress - 1.0) < 1.0e-9, "note learner: progress reaches 100%");
+
+    const auto stopped = learnNoteNet (audio, g, polyTestCalibration(), [] (double p) { return p < 0.3; }, quick);
+    check (! stopped.usable(), "note learner: stopping gives no scorer");
+
+    CalibrationAudio few;
+    few.rate = audio.rate;
+    few.notes.assign (audio.notes.begin(), audio.notes.begin() + 10);
+    check (! learnNoteNet (few, g, polyTestCalibration(), {}, quick).usable(), "note learner: too few frets, no scorer");
 }
 
 static void testPolyTracking()
@@ -1854,6 +1963,8 @@ int main()
     testFullCalibration();
     testCalibrationDraft();
     testSetupPreset();
+    testCalibrationAudio();
+    testNoteLearner();
     testCalibrationHints();
     testTimbreString();
     testChordTracking();

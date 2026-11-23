@@ -270,6 +270,8 @@ namespace gl
         {
             if (trying()) stopTrying();
             session.back();
+            proc.work.calLearning.reset();      // the result changes: learn again after the next Finish
+            proc.work.calConfirmed = false;
             if (page == Page::Done) showPage (Page::Running);
             tick();
         };
@@ -280,7 +282,7 @@ namespace gl
         acceptButton.onClick = [this] { session.accept(); tick(); };
 
         skipButton.setTooltip ("Skip\nSkip this step. Safe defaults are used for it.");
-        skipButton.onClick = [this] { session.skip(); if (session.finished()) showPage (Page::Done); tick(); };
+        skipButton.onClick = [this] { session.skip(); if (session.finished()) showDone(); tick(); };
 
         tryButton.setTooltip ("Try it\nTurns the new calibration on right now, before you save it: play notes and chords, "
                               "and the notes Guitar Lab hears (and the chord name) show here in big letters. "
@@ -298,8 +300,13 @@ namespace gl
         discardButton.setTooltip ("Discard\nThrow these results away and keep the previous calibration.");
         discardButton.onClick = [this] { finish (false); };
 
+        finishButton.setTooltip ("Finish\nEverything was played right: show the results. After a Full calibration, Poly mode "
+                                 "then learns your guitar's sound (1-2 minutes).\n"
+                                 "If the last thing you played went wrong, press Back instead and play it again.");
+        finishButton.onClick = [this] { proc.work.calConfirmed = true; showPage (Page::Done); };
+
         for (auto* b : { &startButton, &fullButton, &endFretsButton, &cancelButton, &listenButton, &backButton, &acceptButton,
-                         &skipButton, &tryButton, &saveButton, &discardButton })
+                         &skipButton, &tryButton, &saveButton, &discardButton, &finishButton })
             addChildComponent (b);
         addChildComponent (autoToggle);
         addChildComponent (autoDelay);
@@ -386,9 +393,10 @@ namespace gl
         backButton.setVisible (running || done);
         acceptButton.setVisible (false);   // shown by tick() when there is a decision to make
         skipButton.setVisible (running);
-        saveButton.setVisible (done);
+        saveButton.setVisible (done && confirmed());
         discardButton.setVisible (done);
-        tryButton.setVisible (done);
+        tryButton.setVisible (done && confirmed());
+        finishButton.setVisible (done && ! confirmed());
         tryLabel.setVisible (done && trying());
         autoToggle.setVisible (! done);
         autoDelay.setVisible (! done);
@@ -412,6 +420,10 @@ namespace gl
 
         startTracker();
         session.start (proc.instrument, hexMode (proc), std::max (1, proc.numGuitarInputs()), full);
+        proc.work.calLearning.reset();
+        proc.work.calAudio.clear();
+        pendingCaptures.clear();
+        lastStepNumber = -1;
         shownProgress = 0.0;
         showPage (Page::Running);
     }
@@ -421,14 +433,20 @@ namespace gl
         if (page != Page::Running) return;
         session.feed (f, hopSeconds);
         if (session.finished())
-            showPage (Page::Done);
+            showDone();
+    }
+
+    void CalibrationWizard::showDone()
+    {
+        proc.work.calConfirmed = false;
+        showPage (Page::Done);
     }
 
     void CalibrationWizard::startTrying()
     {
         if (trying() || ! session.finished()) return;
         proc.work.calTryBackup = proc.calibration;
-        proc.calibration = session.result();
+        proc.calibration = newCalibration();
         proc.calibrating = false;           // track and send MIDI as normal, with the new calibration
         proc.rebuildTracker();
     }
@@ -449,7 +467,16 @@ namespace gl
             proc.work.calTryBackup.reset();
         }
         if (save && session.finished())
-            proc.calibration = session.result();
+            proc.calibration = newCalibration();
+        proc.work.calLearning.reset(); // stops it if it still runs (Discard)
+        // The sound of every fret (Full calibration) is kept in a file, so Poly can learn from it again later.
+        if (save && session.finished() && ! proc.work.calAudio.empty())
+        {
+            const auto dir = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                                 .getChildFile ("Guitar Lab").getChildFile ("Calibration audio");
+            if (dir.createDirectory())
+                proc.work.calAudio.save (std::filesystem::path (dir.getChildFile ("latest.glaudio").getFullPathName().toWideCharPointer()));
+        }
 
         proc.calibrating = false;
         proc.rebuildTracker();
@@ -457,6 +484,34 @@ namespace gl
         proc.work.calPage = 0;
         proc.work.calOpen = false;
         if (onClose) onClose();
+    }
+
+    void CalibrationWizard::startLearning()
+    {
+        auto& w = proc.work;
+        if (w.calLearning != nullptr || w.calAudio.notes.size() < 24)
+            return; // already learning or learned, or not a Full calibration
+        w.calLearning = std::make_unique<GuitarLabProcessor::PanelWork::NoteLearning>();
+        auto* job = w.calLearning.get();
+        job->worker = std::thread ([job, audio = w.calAudio, inst = proc.instrument, cal = session.result()]
+        {
+            job->result = learnNoteNet (audio, inst, cal, [job] (double p) { job->progress = p; return ! job->cancel.load(); });
+            job->done = true;
+        });
+    }
+
+    bool CalibrationWizard::learning() const
+    {
+        const auto* job = proc.work.calLearning.get();
+        return job != nullptr && ! job->done.load();
+    }
+
+    Calibration CalibrationWizard::newCalibration() const
+    {
+        auto c = session.result();
+        if (const auto* job = proc.work.calLearning.get(); job != nullptr && job->done.load() && job->result.usable())
+            c.net = job->result;
+        return c;
     }
 
     juce::String CalibrationWizard::summary() const
@@ -541,9 +596,36 @@ namespace gl
         lastCueStep = step;
     }
 
+    void CalibrationWizard::captureFretAudio()
+    {
+        // A fret of a Full calibration passed (it was listening, and the next item came): copy its sound 0.6 s later,
+        // so the recording holds the pick and most of the note. The input is copied while calibrating (tunerRing).
+        const auto now = juce::Time::getMillisecondCounter();
+        const int step = session.stepNumber();
+        if (page == Page::Running && lastListening && step == lastStepNumber + 1 && lastFretItem.string >= 0)
+            pendingCaptures.push_back ({ lastFretItem.string, lastFretItem.fret, now + 600 });
+
+        const double rate = proc.getSampleRate() > 0.0 ? proc.getSampleRate() : 48000.0;
+        for (auto it = pendingCaptures.begin(); it != pendingCaptures.end();)
+        {
+            if ((juce::int32) (now - it->at) < 0) { ++it; continue; }
+            const int count = std::min (GuitarLabProcessor::tunerRingSize(), (int) (2.0 * rate));
+            captureBuffer.resize ((size_t) count);
+            proc.readTunerInput (captureBuffer.data(), count);
+            proc.work.calAudio.put (it->string, it->fret, captureBuffer.data(), count, rate);
+            it = pendingCaptures.erase (it);
+        }
+
+        lastStepNumber = step;
+        lastListening = session.isListening();
+        const bool fretItem = session.step() == CalibrationSession::Step::EveryNote && session.expectedFret() >= 0;
+        lastFretItem = fretItem ? FretItem { session.currentString(), session.expectedFret() } : FretItem {};
+    }
+
     void CalibrationWizard::tick()
     {
         playCues();
+        captureFretAudio();
         switch (page)
         {
             case Page::Tuning:
@@ -615,7 +697,7 @@ namespace gl
                 if (buttonsChanged) resized();
                 if (session.finished())
                 {
-                    showPage (Page::Done);
+                    showDone();
                     break;
                 }
                 if (std::abs (shownProgress - session.stepProgress()) > 0.005)
@@ -628,8 +710,28 @@ namespace gl
 
             case Page::Done:
             {
+                if (! confirmed())
+                {
+                    title.setText ("Calibration - all steps played", juce::dontSendNotification);
+                    body.setText ("That was the last step.\n\n"
+                                  "If the last thing you played went wrong (a wrong fret, a buzz, another string ringing), "
+                                  "press Back and play it again.\n\n"
+                                  "If everything went well, press Finish to see the results.",
+                                  juce::dontSendNotification);
+                    break;
+                }
                 title.setText ("Calibration - done", juce::dontSendNotification);
-                body.setText (summary(), juce::dontSendNotification);
+                startLearning();
+                juce::String text = summary();
+                if (learning())
+                    text << "\n\nLearning your guitar's sound for Poly mode... "
+                         << juce::String ((int) std::lround (100.0 * proc.work.calLearning->progress.load())) << "%  "
+                         << "(1-2 minutes; Save and Try it wait for it).";
+                else if (const auto* job = proc.work.calLearning.get(); job != nullptr && job->result.usable())
+                    text << "\n\nPoly mode learned your guitar's sound: it now tells real notes from overtones much better.";
+                body.setText (text, juce::dontSendNotification);
+                saveButton.setEnabled (! learning());
+                tryButton.setEnabled (! learning());
                 tryButton.setButtonText (trying() ? "Stop trying" : "Try it");
                 if (tryLabel.isVisible() != trying())
                 {
@@ -686,7 +788,7 @@ namespace gl
 
         auto buttons = r.removeFromBottom (30);
         for (auto* b : { &startButton, &fullButton, &listenButton, &acceptButton, &backButton, &skipButton, &endFretsButton,
-                         &tryButton, &saveButton, &discardButton, &cancelButton })
+                         &finishButton, &tryButton, &saveButton, &discardButton, &cancelButton })
             if (b->isVisible())
             {
                 b->setBounds (buttons.removeFromLeft (b == &startButton || b == &fullButton || b == &endFretsButton ? 210

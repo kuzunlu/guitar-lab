@@ -31,7 +31,8 @@ Tab order (= the `Tab` enum in `PluginEditor.h`, = the `addTab` order):
    (`Midi/ChordTimeline`); "To Reharm Lab" sends them there.
 3. **Chord Shapes** – type or pick any chord symbol (`Cmaj7`, `F#m7b5`, `G7#9`, `D/F#`, `E7alt`) and see every
    playable shape for this tuning as chord diagrams (`parseChordName` + `findShapes`).
-4. **Reharm Lab** – type a progression (`I V vi IV`, `Dm7 G7 Cmaj7`, lengths `C:2 G:2 Am F:8` or `| C G | Am |`,
+4. **Reharm Lab** – (pointing at a chord card pops up its chord diagram: `ReharmPanel::showHoverShape`, a `ShapeGrid`)
+   type a progression (`I V vi IV`, `Dm7 G7 Cmaj7`, lengths `C:2 G:2 Am F:8` or `| C G | Am |`,
    or drag the line between two chord cards), get substitutions
    (tritone sub, secondary dominant, borrowed chord, passing diminished, related ii-V, diatonic sub,
    backdoor dominant, extensions) with playable, voice-led voicings.
@@ -153,7 +154,19 @@ Keep `Theory/`, `Midi/` and `Tracking/` free of JUCE, so they stay testable and 
   reading from after its own analysis). When it hears one note clearly (clarity > 0.9, 2 readings in a row) and that note
   was just picked (not ringing for 8+ frames, not re-picked), Poly starts no note at +12/19/24/28/31 above it. On real
   licks this halved the wrong notes on single notes; it costs ~3% of the notes in chord licks (an exception for
-  "another note in the same pick" was tried and let most mistakes back in). Strings: a small search
+  "another note in the same pick" was tried and let most mistakes back in).
+  **Learned note scorer (after a Full calibration):** `cal.net` (`NoteNet` in `Calibration.h`, saved as `N`/`NM`/`NS`/`NW`/
+  `NB`/`NO` lines) decides INSTEAD of the rules above whether a possible new note starts. It sees 40 features
+  (`PolyTracker::noteFeatures`: the rules' measures, when the note's energy started compared with its louder "parent"
+  below (the short spectra of the last 4 analyses), how much more there is than the calibrated parent makes alone, and
+  the clear-note detector). `Tracking/NoteLearner`: the wizard keeps ~1 s of audio per fret (`CalibrationAudio`,
+  `captureFretAudio`: copied from `tunerRing` 0.6 s after a fret is OK; saved to AppData\Guitar Lab\Calibration
+  audio\latest.glaudio on Save), and after **Finish** on the Done page `learnNoteNet` mixes them into chords/arpeggios/
+  melodies with known notes, trains a small network (24 tanh units, Adam) on what Poly saw, and sets its strictness on
+  another mix ("balanced" = best found-minus-wrong + 1). It runs on a thread in `proc.work.calLearning` (1-2 min);
+  Save / Try it wait for it. Benchmark (IDMT, `tools/benchmark --detail learn3`): chord licks 74.3% / 76 wrong ->
+  76.5% / 22.5, single-note licks 89.1% / 67 -> 92.1% / 41, ~5 ms faster. Without such a calibration nothing changes.
+  The learning uses default tracker settings; the scorer only fits the guitar and setup it was learned on. Strings: a small search
   (`startNotes`) - one note per string, hand span, near the hand, notes of the same strum may move string.
   In a strum of 3+ notes, `completeChord` adds octave notes hidden in a known shape (common shapes + taught chords)
   as soon as a new note starts (and again at ~75 and ~130 ms); when the pitches fit a shape exactly, notes move to
@@ -184,7 +197,10 @@ Keep `Theory/`, `Midi/` and `Tracking/` free of JUCE, so they stay testable and 
   The wizard finds them by comparing phase and step number with the last tick (`playCues`).
   **Unfinished calibration:** while the wizard is on its Running page, the project saves `calibrationDraft`
   (`CalibrationSession::saveDraft`: plan, step, tuning, levels, the calibration so far). Loading it opens the wizard
-  at the same step; Back cannot go to steps from before the load (`backLimit`).
+  at the same step; Back cannot go to steps from before the load (`backLimit`). (The fret recordings for the learned
+  scorer are not in the draft: after loading one, only the frets played since are learned from.)
+  **Done page:** first "all steps played - was the last one right?" (Back / Finish / Discard, `proc.work.calConfirmed`);
+  only after Finish the results show and the learning starts.
 - **Lighthouse tuner** (`UI/LighthouseTuner`, "Tuner..." on the Guitar -> MIDI tab): the processor copies the raw input
   into `tunerRing` ONLY while `proc.tunerOn` is true (tuner open). The tuner runs its own YIN on every screen refresh
   (`VBlankAttachment`) and smooths the cents; closed, it costs nothing. **Note log** (`NoteLogView`): every tracker

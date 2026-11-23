@@ -37,6 +37,8 @@ namespace gl
         longSpec.prepare (kLong, kLong / 8);
         shortSpec.prepare (kShort);
         prevShort.assign ((size_t) kShort / 2, 0.0f);
+        for (auto& h : shortHist) h.assign ((size_t) kShort / 2, 0.0f);
+        shortPos = 0;
 
         // Pitches this guitar can play: lowest open string to the last fret of each string.
         int lo = 127, hi = 0;
@@ -321,6 +323,7 @@ namespace gl
         lp2.reset();
         std::fill (ring.begin(), ring.end(), 0.0f);
         std::fill (prevShort.begin(), prevShort.end(), 0.0f);
+        for (auto& h : shortHist) std::fill (h.begin(), h.end(), 0.0f);
         std::fill (x.begin(), x.end(), 0.0f);
         std::fill (act.begin(), act.end(), 0.0f);
         for (auto& h : history) h.fill (0.0f);
@@ -403,6 +406,11 @@ namespace gl
             prevShort[k] = sm[k];
         }
         const float flux = rise / (sum + 1.0e-9f);
+        {
+            auto& sh = shortHist[(size_t) shortPos]; // for the learned scorer: when did each overtone start?
+            for (size_t k = 0; k < sh.size() && k < sm.size(); ++k) sh[k] = std::sqrt (sm[k]);
+            shortPos = (shortPos + 1) % 4;
+        }
 
         const float gateOn = cal.gateOn() / (float) settings.sensitivity;
         const bool pluck = levelPeak > gateOn && levelPeak > envelope * 1.6f + gateOn * 0.5f;
@@ -608,6 +616,134 @@ namespace gl
         return d == 12 || d == 19 || d == 24 || d == 28 || d == 31;
     }
 
+    // What the learned scorer sees about a possible new note p: the rules' own measures, plus when p's energy started
+    // compared with its "parent" (the louder note below it that has p as an overtone), how much more of it there is
+    // than this guitar's calibrated parent makes alone, and what the one-note detector hears clearly.
+    void PolyTracker::noteFeatures (int p, float shareRel, bool rising, float before, float strongest, float* f) const
+    {
+        const float xp = std::max (x[(size_t) p], 1.0e-9f);
+        const double m = lowestPitch + p;
+        auto lg = [] (float v, float lo, float hi) { return std::clamp (std::log2 (std::max (v, 1.0e-9f)), lo, hi); };
+        auto harmonicOf = [] (int d) { return d == 12 ? 2 : d == 19 ? 3 : d == 24 ? 4 : d == 28 ? 5 : d == 31 ? 6 : 0; };
+
+        // Strongest louder note below on a harmonic of it (parent), above it as a harmonic (child), next to it.
+        int parent = -1, child = -1;
+        float parentX = 0.0f, childX = 0.0f, neighbour = 0.0f;
+        for (int q = 0; q < numPitches; ++q)
+        {
+            if (q == p || ! (notes[(size_t) q].on || candidate[(size_t) q] > 0)) continue;
+            const float xq = x[(size_t) q];
+            const int d = p - q;
+            if (harmonicOf (d) > 0 && xq > xp && xq > parentX) { parent = q; parentX = xq; }
+            if ((d == -12 || d == -19 || d == -24) && xq > 0.3f * xp && xq > childX) { child = q; childX = xq; }
+            if (std::abs (d) <= 2 && xq > xp) neighbour = std::max (neighbour, lg (xq / xp, 0.0f, 6.0f));
+        }
+        const int clearP = clearNote - lowestPitch;
+        if (parent < 0 && clearRun >= 2 && clearP >= 0 && clearP < numPitches && harmonicOf (p - clearP) > 0)
+        {
+            parent = clearP;
+            parentX = std::max (x[(size_t) clearP], 1.0e-9f);
+        }
+        int sounding = 0;
+        for (const auto& n : notes) if (n.on) ++sounding;
+        const float parentRatio = parent >= 0 ? lg (xp / parentX, -8.0f, 3.0f) : 0.0f;
+        const bool parentNew = parent >= 0 && onsetX[(size_t) parent] < 0.3f * parentX;
+        const float fund = spectrumAt (m);
+
+        int k = 0;
+        f[k++] = 1.0f;
+        f[k++] = lg (shareRel, -4.0f, 4.0f);
+        f[k++] = lg (xp / strongest, -8.0f, 0.0f);
+        f[k++] = rising ? 1.0f : 0.0f;
+        f[k++] = lg (xp / std::max (before, 1.0e-9f), -3.0f, 6.0f);
+        f[k++] = sinceOnset <= 8 ? 1.0f : 0.0f;
+        f[k++] = (float) std::min (sinceOnset, 30) / 30.0f;
+        f[k++] = (float) std::min (sinceBurst, 30) / 30.0f;
+        f[k++] = isGhost (p, rising) ? 1.0f : 0.0f;
+        f[k++] = hasHarmonicPeaks (p) ? 1.0f : 0.0f;
+        f[k++] = isClaimed (p) ? 1.0f : 0.0f;
+        f[k++] = parent >= 0 ? 1.0f : 0.0f;
+        f[k++] = parentRatio;
+        f[k++] = parentNew ? 1.0f : 0.0f;
+        f[k++] = parent >= 0 && p - parent == 12 ? 1.0f : 0.0f;
+        f[k++] = child >= 0 ? 1.0f : 0.0f;
+        f[k++] = child >= 0 && hasOwnFundamental (p, child) ? 1.0f : 0.0f;
+        f[k++] = neighbour;
+        f[k++] = (float) (m - 64.0) / 12.0f;
+        f[k++] = std::clamp (ownEnergyAt (p, m) / std::max (fund, 1.0e-9f), -1.0f, 1.5f);
+        f[k++] = (float) sounding / 6.0f;
+        f[k++] = midiToHz (m) < 105.0 ? 1.0f : 0.0f;
+        f[k++] = sinceBurst < (m < 52 ? 3 : 2) ? 1.0f : 0.0f;
+        f[k++] = rising && parent >= 0 ? 1.0f : 0.0f;
+        f[k++] = parentNew ? parentRatio : 0.0f;
+        f[k++] = rising ? parentRatio : 0.0f;
+
+        // New: does p's energy start together with its parent's own (odd) harmonics, and is there more of it than
+        // this guitar's calibrated parent makes by itself?
+        const int hn = parent >= 0 ? harmonicOf (p - parent) : 0;
+        float r[4] = {}, a0 = 0.0f, a3 = 0.0f, b0 = 0.0f, b3 = 0.0f, rV = 0.0f, rMax = 0.0f, rMin = 0.0f;
+        if (hn > 0)
+        {
+            const double fq = midiToHz (lowestPitch + parent);
+            const double binHz = rate / kShort;
+            auto shortAt = [&] (const std::vector<float>& s, double hz)
+            {
+                const int b = (int) std::lround (hz / binHz);
+                float v = 0.0f;
+                for (int i = b - 1; i <= b + 1; ++i) if (i >= 1 && i < (int) s.size()) v = std::max (v, s[(size_t) i]);
+                return v;
+            };
+            for (int t = 0; t < 4; ++t)
+            {
+                const auto& s = shortHist[(size_t) ((shortPos + 3 - t) % 4)];
+                const float a = shortAt (s, hn * fq);
+                float b = 1.0e-6f;
+                for (int h = 1; h <= 6; ++h) if (h % hn != 0) b += shortAt (s, h * fq);
+                r[t] = std::log2 ((a + 1.0e-6f) / b);
+                if (t == 0) { a0 = a; b0 = b; }
+                if (t == 3) { a3 = a; b3 = b; }
+            }
+            // The same ratio in the long spectrum, and in the parent's own fingerprints (calibrated: per string).
+            auto ratioIn = [&] (auto valueAt)
+            {
+                float b = 1.0e-6f;
+                for (int h = 1; h <= 6; ++h) if (h % hn != 0) b += valueAt (12.0 * std::log2 ((double) h));
+                return std::log2 ((valueAt (12.0 * std::log2 ((double) hn)) + 1.0e-6f) / b);
+            };
+            const double mq = lowestPitch + parent;
+            rV = ratioIn ([&] (double up) { return spectrumAt (mq + up); });
+            rMax = -100.0f; rMin = 100.0f;
+            for (int t : pitchTemplates[(size_t) parent])
+            {
+                const float rt = ratioIn ([&] (double up)
+                {
+                    const int b = (int) std::lround ((mq + up - midiLo) * kBinsPerSemitone);
+                    float v = 0.0f;
+                    for (int i = b - 1; i <= b + 1; ++i)
+                        if (i >= 0 && i < numBins) v = std::max (v, dense[(size_t) t * (size_t) numBins + (size_t) i]);
+                    return v;
+                });
+                rMax = std::max (rMax, rt);
+                rMin = std::min (rMin, rt);
+            }
+            if (rMax < rMin) rMax = rMin = rV;
+        }
+        f[k++] = hn > 0 ? 1.0f : 0.0f;
+        f[k++] = std::clamp (r[0], -8.0f, 4.0f);
+        f[k++] = std::clamp (r[0] - r[1], -6.0f, 6.0f);
+        f[k++] = std::clamp (r[0] - r[2], -6.0f, 6.0f);
+        f[k++] = std::clamp (r[0] - r[3], -6.0f, 6.0f);
+        f[k++] = std::clamp (rV, -8.0f, 4.0f);
+        f[k++] = std::clamp (rV - rMax, -8.0f, 8.0f);
+        f[k++] = std::clamp (rV - rMin, -8.0f, 8.0f);
+        f[k++] = clearRun >= 2 && clearP == p ? 1.0f : 0.0f;
+        f[k++] = clearRun >= 2 && clearP >= 0 && harmonicOf (p - clearP) > 0 ? 1.0f : 0.0f;
+        f[k++] = (float) std::min (clearRun, 10) / 10.0f;
+        f[k++] = (float) hn / 6.0f;
+        f[k++] = hn > 0 ? std::clamp (std::log2 ((a0 + 1.0e-6f) / (a3 + 1.0e-6f)), -6.0f, 6.0f) : 0.0f;
+        f[k++] = hn > 0 ? std::clamp (std::log2 (b0 / b3), -6.0f, 6.0f) : 0.0f;
+    }
+
     void PolyTracker::updateNotes()
     {
         float total = 1.0e-9f, strongest = 1.0e-9f;
@@ -702,6 +838,18 @@ namespace gl
             // Right after a pick attack the window holds only a little of the new note: its pitch is still blurred.
             // Low notes need one frame more (their harmonics are closer together).
             if (ok && sinceBurst < (lowestPitch + p < 52 ? 3 : 2)) ok = false;
+
+            // After a Full calibration, the scorer learned from this guitar decides instead of the rules above (it
+            // knows its overtones much better). It sees every pitch with a little new energy.
+            const bool learned = cal.net.usable() && cal.net.inputs == kNumNoteFeatures;
+            if ((learned || featureSink) && level > gateOn && (share > 0.3f * onShare || rising))
+            {
+                float f[kNumNoteFeatures];
+                noteFeatures (p, share / onShare, rising, before, strongest, f);
+                if (featureSink) featureSink (lowestPitch + p, f, kNumNoteFeatures, ok);
+                if (learned) ok = cal.net.score (f) > 0.0f;
+            }
+            else if (learned) ok = false;
 
             candidate[(size_t) p] = ok ? candidate[(size_t) p] + 1 : 0;
             // The lowest notes (below ~105 Hz) are the easiest to fake: one more frame of proof.

@@ -7,9 +7,12 @@
 #include "Theory/Reharm.h"
 #include "Theory/Trainer.h"
 #include "Theory/Voicing.h"
+#include "Tracking/NoteLearner.h"
 #include "Tracking/GuitarTracker.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
+
+#include <thread>
 #include <juce_audio_devices/juce_audio_devices.h>
 
 #include <array>
@@ -117,6 +120,19 @@ public:
         int  calPage = 0;                        // CalibrationWizard::Page
         bool calOpen = false;
         std::optional<gl::Calibration> calTryBackup; // "Try it": the calibration in use before the new one was tried
+        gl::CalibrationAudio calAudio;           // Full calibration: the sound of every fret (Poly learns from it)
+
+        // Poly learning this guitar's sound from calAudio (NoteLearner), on its own thread, after a Full calibration.
+        struct NoteLearning
+        {
+            std::thread worker;
+            std::atomic<double> progress { 0.0 };
+            std::atomic<bool> cancel { false }, done { false };
+            gl::NoteNet result;                  // read only after done
+            ~NoteLearning() { cancel = true; if (worker.joinable()) worker.join(); }
+        };
+        std::unique_ptr<NoteLearning> calLearning;
+        bool calConfirmed = false;               // the player said the last step was right (Finish): learning may start
 
         // Play & Write
         std::vector<std::string> phraseUndo;
@@ -192,9 +208,10 @@ public:
     };
     int popTrackedEvents (TrackedEvent* dest, int maxEvents); // message thread
 
-    // --- Lighthouse tuner: the raw guitar input, copied only while the tuner is open ---
+    // --- Lighthouse tuner: the raw guitar input, copied only while the tuner is open (or while calibrating) ---
     std::atomic<bool> tunerOn { false };
-    void readTunerInput (float* dest, int count) const; // the newest `count` samples (count <= 16384), message thread
+    void readTunerInput (float* dest, int count) const; // the newest `count` samples (count <= tunerRingSize()), message thread
+    static constexpr int tunerRingSize() { return kTunerRing; }
     juce::int64 samplesSoFar() const { return samplesProcessed.load(); }
     int    popRecordEvents (RecordEvent* dest, int maxEvents); // message thread
     double currentBpm() const { return renderBpm(); }
@@ -270,7 +287,7 @@ private:
     juce::AbstractFifo trackedFifo { 4096 };
     std::vector<TrackedEvent> trackedStore = std::vector<TrackedEvent> (4096);
     std::atomic<juce::int64> samplesProcessed { 0 };
-    static constexpr int kTunerRing = 1 << 15;
+    static constexpr int kTunerRing = 1 << 18; // ~5 s at 48 kHz: a Full calibration copies each fret's note from it
     std::vector<float> tunerRing = std::vector<float> ((size_t) kTunerRing);
     std::atomic<int> tunerWrite { 0 };
     bool   recordUsesTransport = false;

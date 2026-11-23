@@ -62,6 +62,7 @@ add_library(GuitarLabCore STATIC
     Source/Tracking/Calibration.cpp
     Source/Tracking/GuitarTracker.cpp
     Source/Tracking/PolyTracker.cpp
+    Source/Tracking/NoteLearner.cpp
 )
 target_include_directories(GuitarLabCore PUBLIC Source)
 

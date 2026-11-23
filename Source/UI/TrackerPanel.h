@@ -94,14 +94,27 @@ namespace gl
                          endFretsButton { "My guitar ends here" }, cancelButton { "Cancel" },
                          listenButton { "Listen" }, backButton { "Back" }, acceptButton { "Use it anyway" }, skipButton { "Skip" },
                          saveButton { "Save calibration" }, discardButton { "Discard" };
-        juce::TextButton tryButton { "Try it" };
+        juce::TextButton tryButton { "Try it" }, finishButton { "Finish" };
+        bool confirmed() const { return proc.work.calConfirmed; }
+        void showDone();                        // the last step passed: first ask whether it was right
         juce::Label tryLabel;                   // "Try it": the notes heard right now, with the new calibration
         void startTrying();
         void stopTrying();
+        void startLearning();                   // Full calibration done: Poly learns this guitar's sound (background)
+        bool learning() const;                  // ...and is not finished yet (Save and Try it wait)
+        Calibration newCalibration() const;     // the result, with what Poly learned
         bool trying() const { return proc.work.calTryBackup.has_value(); }
         juce::ToggleButton autoToggle { "Auto listen" }, cuesToggle { "Sound cues" };
         juce::Slider autoDelay;
         void playCues();                        // a cue when listening starts, a step passes, or something is wrong
+        void captureFretAudio();                // Full calibration: keep the sound of each fret that was OK
+        struct FretItem { int string = -1, fret = -1; };
+        FretItem lastFretItem;                  // the fret being measured at the last tick (string -1 = no fret item)
+        int  lastStepNumber = -1;
+        bool lastListening = false;
+        struct PendingCapture { int string, fret; juce::uint32 at; };
+        std::vector<PendingCapture> pendingCaptures;
+        std::vector<float> captureBuffer;
         int lastCuePhase = -1, lastCueStep = -1;
         double shownProgress = 0.0;
         juce::uint32 readySince = 0;            // auto listen: when the current step became ready

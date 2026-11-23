@@ -75,6 +75,25 @@ namespace gl
         return globalCents;
     }
 
+    bool NoteNet::usable() const
+    {
+        return inputs > 0 && hidden > 0 && mean.size() == (size_t) inputs && scale.size() == (size_t) inputs
+            && w1.size() == (size_t) (inputs * hidden) && b1.size() == (size_t) hidden && w2.size() == (size_t) hidden;
+    }
+
+    float NoteNet::score (const float* f) const
+    {
+        float out = b2 + offset;
+        for (int j = 0; j < hidden; ++j)
+        {
+            float a = b1[(size_t) j];
+            for (int k = 0; k < inputs; ++k)
+                a += w1[(size_t) (j * inputs + k)] * (f[k] - mean[(size_t) k]) / scale[(size_t) k];
+            out += w2[(size_t) j] * std::tanh (a);
+        }
+        return out;
+    }
+
     std::string Calibration::serialise() const
     {
         std::ostringstream out;
@@ -121,6 +140,20 @@ namespace gl
             for (int f : ch.frets) out << ' ' << f;
             for (float v : ch.chroma) out << ' ' << v;
             out << '\n';
+        }
+
+        // The learned note scorer: "N inputs hidden b2 offset", then one line per table.
+        if (net.usable())
+        {
+            out << "N " << net.inputs << ' ' << net.hidden << ' ' << net.b2 << ' ' << net.offset << '\n';
+            const std::pair<const char*, const std::vector<float>*> tables[] = {
+                { "NM", &net.mean }, { "NS", &net.scale }, { "NW", &net.w1 }, { "NB", &net.b1 }, { "NO", &net.w2 } };
+            for (const auto& [tag, values] : tables)
+            {
+                out << tag << ' ' << values->size();
+                for (float v : *values) out << ' ' << v;
+                out << '\n';
+            }
         }
         return out.str();
     }
@@ -271,6 +304,18 @@ namespace gl
                     positions[(size_t) s][(size_t) f].attack = a;
                     positions[(size_t) s][(size_t) f].hasAttack = true;
                 }
+            }
+            else if (tag == "N")
+            {
+                ls >> net.inputs >> net.hidden >> net.b2 >> net.offset;
+            }
+            else if (tag == "NM" || tag == "NS" || tag == "NW" || tag == "NB" || tag == "NO")
+            {
+                auto& values = tag == "NM" ? net.mean : tag == "NS" ? net.scale : tag == "NW" ? net.w1 : tag == "NB" ? net.b1 : net.w2;
+                size_t count = 0;
+                ls >> count;
+                values.assign (std::min<size_t> (count, 100000), 0.0f);
+                for (auto& v : values) ls >> v;
             }
             else if (tag == "K")
             {

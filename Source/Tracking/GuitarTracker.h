@@ -50,6 +50,9 @@ namespace gl
 
         TrackMode mode() const { return settings.mode; }
 
+        // Poly: what it knows about each possible new note (for NoteLearner only, never on the plugin's audio thread).
+        void setNoteFeatureSink (PolyTracker::FeatureSink sink) { poly.setFeatureSink (std::move (sink)); }
+
     private:
         struct Voice
         {

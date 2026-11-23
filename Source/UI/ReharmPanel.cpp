@@ -100,7 +100,20 @@ namespace gl
 
     void ChordStrip::mouseMove (const juce::MouseEvent& e)
     {
-        setMouseCursor (edgeAt (e.position) >= 0 ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::NormalCursor);
+        const bool onEdge = edgeAt (e.position) >= 0;
+        setMouseCursor (onEdge ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::NormalCursor);
+        if (const int card = onEdge ? -1 : cardAt (e.position); card != hovered)
+        {
+            hovered = card;
+            if (onHover) onHover (card);
+        }
+    }
+
+    void ChordStrip::mouseExit (const juce::MouseEvent&)
+    {
+        if (hovered < 0) return;
+        hovered = -1;
+        if (onHover) onHover (-1);
     }
 
     void ChordStrip::mouseDown (const juce::MouseEvent& e)
@@ -165,7 +178,7 @@ namespace gl
                          + "Length: " + juce::String (tc.beats, 2) + " beats";
         if (tc.substituted)
             tip << "\nWhy: " << juce::String (tc.reason);
-        tip << "\nClick to hear it, show its voicing on the fretboard and list only its suggestions.";
+        tip << "\nPoint at it to see its shape. Click to hear it, show its voicing on the fretboard and list only its suggestions.";
         return tip;
     }
 
@@ -299,6 +312,7 @@ namespace gl
             input.setText (progressionToText (original, currentKey().prefersFlats()), juce::dontSendNotification);
             parseInput();
         };
+        originalStrip.onHover = [this] (int i) { showHoverShape (false, i); };
         addAndMakeVisible (originalStrip);
 
         resultStrip.title = "Reharmonized (yellow = changed)";
@@ -308,7 +322,11 @@ namespace gl
             for (size_t i = 0; i < beats.size() && i < result.size(); ++i) result[i].beats = beats[i];
             revoice();
         };
+        resultStrip.onHover = [this] (int i) { showHoverShape (true, i); };
         addAndMakeVisible (resultStrip);
+
+        hoverShape.setInterceptsMouseClicks (false, false); // the mouse keeps moving over the cards below it
+        addChildComponent (hoverShape);
 
         label (suggestionsLabel, "Single suggestions (double-click to apply to the bottom row)",
                "Suggestion list\nEvery single change the engine found for the bottom row, with a short reason.\n"
@@ -411,9 +429,45 @@ namespace gl
         updateView();
     }
 
+    void ReharmPanel::showHoverShape (bool resultRow, int index)
+    {
+        const auto& chords = resultRow ? result : original;
+        Voicing v;
+        if (index >= 0 && index < (int) chords.size())
+        {
+            if (resultRow && index < (int) voicings.size())
+                v = voicings[(size_t) index];  // the voicing the bottom row really uses
+            else if (auto found = findVoicings (chords[(size_t) index].chord, proc.instrument, voicingOptions(), 1); ! found.empty())
+                v = found.front();
+        }
+        if (v.frets.empty())
+        {
+            hoverShape.setVisible (false);
+            return;
+        }
+
+        hoverShape.shapes = { v };
+        hoverShape.inst = proc.instrument;
+        hoverShape.root = chords[(size_t) index].chord.root;
+        hoverShape.flats = currentKey().prefersFlats();
+
+        // Next to the card: below the bottom row, above the top row (or the other way when there is no room).
+        auto& strip = resultRow ? resultStrip : originalStrip;
+        const auto card = getLocalArea (&strip, strip.cardArea (index));
+        const int w = ShapeGrid::kCardW, h = ShapeGrid::kCardH;
+        int y = resultRow ? card.getBottom() + 4 : card.getY() - h - 4;
+        if (y < 0) y = card.getBottom() + 4;
+        if (y + h > getHeight()) y = std::max (0, card.getY() - h - 4);
+        hoverShape.setBounds (juce::jlimit (0, std::max (0, getWidth() - w), card.getCentreX() - w / 2), y, w, h);
+        hoverShape.setVisible (true);
+        hoverShape.toFront (false);
+        hoverShape.repaint();
+    }
+
     void ReharmPanel::updateView()
     {
         proc.work.reharmFor = workKey();
+        hoverShape.setVisible (false);
 
         // Suggestions for the current bottom row.
         suggestions = findSuggestions (result, currentKey());

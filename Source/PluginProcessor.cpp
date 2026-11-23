@@ -458,8 +458,8 @@ void GuitarLabProcessor::processBlock (juce::AudioBuffer<float>& audio, juce::Mi
 
     audio.clear();
 
-    // Lighthouse tuner (only while it is open): the chosen input, or all inputs mixed.
-    if (tunerOn.load() && numIn > 0)
+    // Lighthouse tuner (only while it is open) and calibration: the chosen input, or all inputs mixed.
+    if ((tunerOn.load() || calibrating.load()) && numIn > 0)
     {
         const int chosen = (int) params.getRawParameterValue (ParamIDs::trackInput)->load() - 1; // -1 = mix
         int w = tunerWrite.load();
