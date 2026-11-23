@@ -313,6 +313,10 @@ namespace gl
 
     void PolyTracker::reset()
     {
+        hintWrite = hintRead = 0;
+        samplesIn = 0;
+        clearNote = -1;
+        clearRun = 0;
         lp1.reset();
         lp2.reset();
         std::fill (ring.begin(), ring.end(), 0.0f);
@@ -366,6 +370,16 @@ namespace gl
     // -----------------------------------------------------------------------
     void PolyTracker::analyse()
     {
+        while (hintRead < hintWrite && hints[(size_t) (hintRead % (int) hints.size())].sample <= samplesIn)
+        {
+            const auto& h = hints[(size_t) (hintRead++ % (int) hints.size())];
+            const int n = h.midi > 0.0f && h.clarity > 0.9f ? (int) std::lround (h.midi) : -1;
+            clearRun = n >= 0 && n == clearNote ? clearRun + 1 : (n >= 0 ? 1 : 0);
+            clearNote = n;
+        }
+        if (hintRead == hintWrite)
+            hintRead = hintWrite = 0;
+
         level = (float) std::sqrt (hopSumSq / kHop);
         levelPeak = hopPeak;
         hopPeak = 0.0f;
@@ -581,6 +595,19 @@ namespace gl
         return false;
     }
 
+    bool PolyTracker::overtoneOfClearNote (int p) const
+    {
+        // The one-note detector clearly hears one note that was just picked: its overtones are not new notes.
+        // A clear note that has rung for a while does not count (a real octave picked over it, in an arpeggio).
+        if (clearRun < 2) return false;
+        const int m = clearNote - lowestPitch;
+        if (m < 0 || m >= numPitches) return false;
+        const auto& n = notes[(size_t) m];
+        if (n.on && (n.age > 8 || n.repicked)) return false;
+        const int d = p - m;
+        return d == 12 || d == 19 || d == 24 || d == 28 || d == 31;
+    }
+
     void PolyTracker::updateNotes()
     {
         float total = 1.0e-9f, strongest = 1.0e-9f;
@@ -671,6 +698,7 @@ namespace gl
             // Without a pick attack (hammer-on, slow swell) only a clearly strong note may start.
             if (ok && sinceOnset > 8 && share < 2.0f * startShare) ok = false;
             if (ok && (isGhost (p, rising) || isClaimed (p) || ! hasHarmonicPeaks (p))) ok = false;
+            if (ok && overtoneOfClearNote (p)) ok = false;
             // Right after a pick attack the window holds only a little of the new note: its pitch is still blurred.
             // Low notes need one frame more (their harmonics are closer together).
             if (ok && sinceBurst < (lowestPitch + p < 52 ? 3 : 2)) ok = false;

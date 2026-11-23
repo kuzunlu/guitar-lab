@@ -78,6 +78,7 @@ namespace gl
             v.chordNotes.fill (-1);
         }
         handFret = 5;
+        samplesIn = 0;
         poly.reset();
     }
 

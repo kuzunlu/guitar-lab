@@ -125,6 +125,65 @@ namespace gl
         return out.str();
     }
 
+    std::string SetupPreset::serialise() const
+    {
+        std::ostringstream out;
+        out << "GLPRESET 1\n";
+        if (! tuning.empty())
+        {
+            out << "U " << tuning.size();
+            for (int n : tuning) out << ' ' << n;
+            out << '\n';
+        }
+        for (const auto& [id, value] : settings)
+            out << "V " << id << ' ' << value << '\n';
+        if (cal.valid)
+            out << "CAL\n" << cal.serialise();
+        return out.str();
+    }
+
+    bool SetupPreset::deserialise (const std::string& text)
+    {
+        *this = SetupPreset {};
+        if (text.rfind ("GLPRESET", 0) != 0)
+        {
+            cal.deserialise (text);
+            calibrationOnly = true;
+            return cal.valid;
+        }
+
+        std::istringstream in (text);
+        std::string line;
+        std::getline (in, line);
+        while (std::getline (in, line))
+        {
+            if (line == "CAL")
+            {
+                std::ostringstream rest;
+                rest << in.rdbuf();
+                cal.deserialise (rest.str());
+                break;
+            }
+            std::istringstream ls (line);
+            std::string tag;
+            ls >> tag;
+            if (tag == "U")
+            {
+                size_t count = 0;
+                ls >> count;
+                for (size_t i = 0; i < count && i < (size_t) kMaxStrings; ++i)
+                    if (int n = 0; ls >> n) tuning.push_back (n);
+            }
+            else if (tag == "V")
+            {
+                std::string id;
+                float value = 0.0f;
+                if (ls >> id >> value) settings.push_back ({ id, value });
+            }
+        }
+        return true;
+    }
+
     void Calibration::deserialise (const std::string& text)
     {
         *this = Calibration {};

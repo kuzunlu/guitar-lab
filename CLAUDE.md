@@ -13,7 +13,7 @@ Tab order (= the `Tab` enum in `PluginEditor.h`, = the `addTab` order):
    Calibration wizard: tuning first, then Quick (silence, open strings, 12th fret, soft/hard) or Full
    (every fret on every string, ~37 chords in mono/poly, soft and hard picking on every string).
    One thing at a time: press Listen (or Space), play, OK, next; Back goes to the step before.
-   Calibrations can be saved and loaded as **presets** (files, shared by all projects).
+   The whole setup (settings, tuning, calibration) can be saved and loaded as **presets** (files, shared by all projects).
    **Intonation report** (`UI/IntonationView`): from a Full calibration, how far every fret plays from its open string.
 2. **Play & Write** – play the neck live (drag = bend / slide) and write MIDI phrases (up to 512 bars) with
    hammer-ons, pull-offs, taps, palm mute, dead notes, harmonics, bends, slides, vibrato and strummed chords.
@@ -141,7 +141,12 @@ Keep `Theory/`, `Midi/` and `Tracking/` free of JUCE, so they stay testable and 
   (`hasHarmonicPeaks`), not inside a ringing note's bend (`isClaimed`). **Hysteresis** (`trackHysteresis`, 0..1,
   default 0 = off): a pitch at +12/19/24/28/31 above a LOUDER note picked in the last ~8 frames (a candidate, a note
   whose energy jumped at the attack, or a young note; re-picked notes do not count, or arpeggios break) needs up to
-  4x more share. It never delays a note. Strings: a small search
+  4x more share. It never delays a note. **Clear-note veto** (always on): voice 0's one-note pitch detector still runs in
+  poly mode and hands each reading to Poly (`PolyTracker::hint`, stamped with its input sample, so Poly never uses a
+  reading from after its own analysis). When it hears one note clearly (clarity > 0.9, 2 readings in a row) and that note
+  was just picked (not ringing for 8+ frames, not re-picked), Poly starts no note at +12/19/24/28/31 above it. On real
+  licks this halved the wrong notes on single notes; it costs ~3% of the notes in chord licks (an exception for
+  "another note in the same pick" was tried and let most mistakes back in). Strings: a small search
   (`startNotes`) - one note per string, hand span, near the hand, notes of the same strum may move string.
   In a strum of 3+ notes, `completeChord` adds octave notes hidden in a known shape (common shapes + taught chords)
   as soon as a new note starts (and again at ~75 and ~130 ms); when the pitches fit a shape exactly, notes move to
@@ -190,8 +195,11 @@ Keep `Theory/`, `Midi/` and `Tracking/` free of JUCE, so they stay testable and 
   test keeps both in step.
 - Voicing search: the **bass is the lowest pitch**, not the lowest string (an open A is below fret 14 on the
   low E). `findShapes` takes any pitch-class set; `findVoicings` is a wrapper for the Reharm Lab.
-- **Calibration presets:** `%APPDATA%\Guitar Lab\Calibrations\<name>.glcal`, plain `Calibration::serialise()`
-  text. Loading one also switches the instrument to `cal.tuning` (through `InstrumentBar::applyTuning`).
+- **Presets (the whole setup):** `%APPDATA%\Guitar Lab\Calibrations\<name>.glcal` (old folder and extension kept, so
+  old presets still show), `SetupPreset` text: `GLPRESET 1`, the tuning, the parameters in `kPresetParams`
+  (`TrackerPanel.cpp`: all but metronome, tempo and host sync) and the calibration. Old files are a bare
+  `Calibration::serialise()` and load as calibration only. Loading switches the instrument to the preset's tuning
+  (through `InstrumentBar::applyTuning`). Add new setup parameters to `kPresetParams`.
   No pop-up windows in the plugin (some hosts handle them badly): the name box and the two-click Delete are
   in the tab itself.
 - **Tab export (`Midi/TabExport`)**: `noteTabText` is THE tab notation (the tab view uses it too). Exports lay notes

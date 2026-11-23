@@ -783,7 +783,8 @@ namespace gl
             "stronger before it starts, but only right after you picked the louder note below it.\n"
             "0 = off (the normal behaviour). 1 = strongest: about a third fewer wrong extra notes, but a quiet real "
             "octave strummed together with its lower note may be missed.\n"
-            "Arpeggios over ringing strings are not affected, and it never adds delay. Mono and hex modes ignore it.");
+            "Arpeggios over ringing strings are not affected, and it never adds delay. Mono and hex modes ignore it "
+            "(it is greyed out there).");
         hysteresis.setSliderStyle (juce::Slider::LinearHorizontal);
         hysteresis.setTextBoxStyle (juce::Slider::TextBoxRight, false, 40, 20);
         hysteresis.setTooltip (hystLabel.getTooltip());
@@ -864,20 +865,22 @@ namespace gl
         addAndMakeVisible (tunerButton);
         addChildComponent (lighthouse);
 
-        // --- Calibration presets ---
-        presetLabel.setText ("Saved calibrations", juce::dontSendNotification);
+        // --- Presets: settings, strings + tuning and calibration together ---
+        presetLabel.setText ("Presets", juce::dontSendNotification);
         presetLabel.setJustificationType (juce::Justification::centredRight);
-        const juce::String presetTip ("Saved calibrations (presets)\n"
-            "Pick one to load it. Use this when you switch guitars or tunings: calibrate each guitar once, save it, "
-            "and load it again later instead of calibrating again.\n"
-            "Loading replaces the calibration in use, and also sets Strings and Tuning in the top bar to the tuning "
-            "the calibration was made for.\n"
-            "'Default (no calibration)' goes back to the plain settings, as if you never calibrated.\n"
+        const juce::String presetTip ("Presets\n"
+            "Pick one to load it. A preset holds your whole setup: the tracking settings on this page, the MIDI and "
+            "sound settings, Strings and Tuning, and the calibration (if you had one when you saved it). "
+            "Use this when you switch guitars or tunings: set up and calibrate each guitar once, save it, and load it "
+            "again later.\n"
+            "Not in a preset: the metronome and the tempo (they belong to the song).\n"
+            "Presets saved by older versions hold only a calibration: loading one changes only the calibration.\n"
+            "'Default' goes back to the plain settings with no calibration (Strings and Tuning stay as they are).\n"
             "Presets are shared by all your projects and by the standalone app. They are saved as small text files in:\n"
             + presetFolder().getFullPathName());
         presetLabel.setTooltip (presetTip);
         presetBox.setTooltip (presetTip);
-        presetBox.setTextWhenNothingSelected ("Choose a saved calibration...");
+        presetBox.setTextWhenNothingSelected ("Choose a preset...");
         presetBox.onChange = [this]
         {
             const int id = presetBox.getSelectedId();
@@ -888,18 +891,18 @@ namespace gl
         addAndMakeVisible (presetBox);
 
         presetName.setTextToShowWhenEmpty ("Name, e.g. Strat Drop D", theme::textDim);
-        presetName.setTooltip ("Preset name\nA name for the calibration you are using now, for example the guitar and its tuning. "
+        presetName.setTooltip ("Preset name\nA name for the setup you are using now, for example the guitar and its tuning. "
                                "Then press 'Save as preset'. A preset with the same name is replaced.");
         presetName.onReturnKey = [this] { savePreset(); };
         addAndMakeVisible (presetName);
 
-        savePresetButton.setTooltip ("Save as preset\nSaves the calibration you are using now under the name on the left, "
-                                     "so you can load it again in any project. Calibrate first.");
+        savePresetButton.setTooltip ("Save as preset\nSaves the settings, Strings and Tuning, and the calibration you are "
+                                     "using now under the name on the left, so you can load them again in any project.");
         savePresetButton.onClick = [this] { savePreset(); };
         addAndMakeVisible (savePresetButton);
 
-        deletePresetButton.setTooltip ("Delete preset\nDeletes the saved calibration chosen on the left (the file, not the "
-                                       "calibration in use). Click twice to be sure. This cannot be undone.");
+        deletePresetButton.setTooltip ("Delete preset\nDeletes the preset chosen on the left (the file, not the "
+                                       "settings in use). Click twice to be sure. This cannot be undone.");
         deletePresetButton.onClick = [this] { deletePreset(); };
         addAndMakeVisible (deletePresetButton);
         refreshPresets();
@@ -967,7 +970,7 @@ namespace gl
         presetFiles = presetFolder().findChildFiles (juce::File::findFiles, false, "*.glcal");
         presetFiles.sort();
         presetBox.clear (juce::dontSendNotification);
-        presetBox.addItem ("Default (no calibration)", kDefaultPresetId);
+        presetBox.addItem ("Default (plain settings, no calibration)", kDefaultPresetId);
         if (! presetFiles.isEmpty()) presetBox.addSeparator();
         for (int i = 0; i < presetFiles.size(); ++i)
             presetBox.addItem (presetFiles[i].getFileNameWithoutExtension(), i + 2);
@@ -975,49 +978,79 @@ namespace gl
         deletePresetButton.setButtonText ("Delete");
     }
 
+    namespace
+    {
+        // The parameters a preset holds: everything except the metronome and the tempo (they belong to the song).
+        const char* const kPresetParams[] = {
+            ParamIDs::trackMode, ParamIDs::trackInput, ParamIDs::trackStability, ParamIDs::trackSensitivity,
+            ParamIDs::trackHysteresis, ParamIDs::trackBends, ParamIDs::trackMonitor,
+            ParamIDs::bendRange, ParamIDs::firstChannel, ParamIDs::sendMpe, ParamIDs::passThrough,
+            ParamIDs::synthOn, ParamIDs::synthVolume, ParamIDs::synthTone,
+            ParamIDs::legatoOverlap, ParamIDs::legatoVelocity, ParamIDs::liveVelocity };
+
+        void setParam (juce::RangedAudioParameter& p, float normalised)
+        {
+            p.beginChangeGesture();
+            p.setValueNotifyingHost (normalised);
+            p.endChangeGesture();
+        }
+    }
+
     void TrackerPanel::loadPreset (const juce::File& file)
     {
-        Calibration c;
-        c.deserialise (file.loadFileAsString().toStdString());
-        if (! c.valid)
+        SetupPreset preset;
+        if (! preset.deserialise (file.loadFileAsString().toStdString()))
         {
             showPresetMessage ("Could not read the preset '" + file.getFileNameWithoutExtension() + "'.");
             return;
         }
 
-        proc.calibration = c;
+        for (const auto& [id, value] : preset.settings)
+            for (const char* known : kPresetParams)
+                if (id == known)
+                    if (auto* p = proc.params.getParameter (known))
+                        setParam (*p, p->convertTo0to1 (value));
+
+        proc.calibration = preset.cal; // a preset saved without a calibration = no calibration
         // A calibration belongs to the tuning it was made for: switch to it.
-        if (! c.tuning.empty() && c.tuning != proc.instrument.tuning() && onTuningWanted)
-            onTuningWanted (c.tuning);
+        const auto& tuning = preset.tuning.empty() ? preset.cal.tuning : preset.tuning;
+        if (! tuning.empty() && tuning != proc.instrument.tuning() && onTuningWanted)
+            onTuningWanted (tuning);
         proc.rebuildTracker();
         presetName.setText (file.getFileNameWithoutExtension(), juce::dontSendNotification);
-        showPresetMessage ("Loaded: " + file.getFileNameWithoutExtension());
+        showPresetMessage ("Loaded: " + file.getFileNameWithoutExtension()
+                           + (preset.calibrationOnly ? " (an older preset: only the calibration)" : ""));
     }
 
     void TrackerPanel::loadDefaultCalibration()
     {
+        for (const char* id : kPresetParams)
+            if (auto* p = proc.params.getParameter (id))
+                setParam (*p, p->getDefaultValue());
         proc.calibration = Calibration {};
         proc.rebuildTracker();
         presetName.clear();
-        showPresetMessage ("Back to the default: no calibration in use.");
+        showPresetMessage ("Back to the default: plain settings, no calibration in use.");
     }
 
     void TrackerPanel::savePreset()
     {
         const auto name = juce::File::createLegalFileName (presetName.getText().trim());
-        if (! proc.calibration.valid)
-        {
-            showPresetMessage ("Nothing to save yet: calibrate first (Calibrate...).");
-            return;
-        }
         if (name.isEmpty())
         {
             showPresetMessage ("Type a name for the preset first (box left of 'Save as preset').");
             return;
         }
 
+        SetupPreset preset;
+        for (const char* id : kPresetParams)
+            if (auto* p = proc.params.getParameter (id))
+                preset.settings.push_back ({ id, p->convertFrom0to1 (p->getValue()) });
+        preset.tuning = proc.instrument.tuning();
+        preset.cal = proc.calibration;
+
         const auto file = presetFolder().getChildFile (name + ".glcal");
-        if (! presetFolder().createDirectory() || ! file.replaceWithText (proc.calibration.serialise()))
+        if (! presetFolder().createDirectory() || ! file.replaceWithText (preset.serialise()))
         {
             showPresetMessage ("Could not save the preset to " + file.getFullPathName());
             return;
@@ -1156,6 +1189,10 @@ namespace gl
         // The playing style box follows the knobs.
         if (const int style = matchingStyle(); styleBox.getSelectedId() != style)
             styleBox.setSelectedId (style, juce::dontSendNotification);
+
+        // Hysteresis only works in poly mode: grey it out in the others (the value is kept).
+        const bool poly = trackMode (proc) == TrackMode::Poly;
+        if (hysteresis.isEnabled() != poly) { hysteresis.setEnabled (poly); hystLabel.setEnabled (poly); }
 
         // Notes the tracker sent: into the note log (string from the MIDI channel).
         noteLog.rate = proc.getSampleRate() > 0.0 ? proc.getSampleRate() : 48000.0;

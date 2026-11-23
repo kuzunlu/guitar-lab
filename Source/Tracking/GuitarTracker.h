@@ -112,7 +112,8 @@ namespace gl
         std::vector<Voice> voices;
         std::vector<float> mix;
         int handFret = 5;
-        PolyTracker poly;     // Poly mode: makes the notes (voice 0 only feeds the tuner display)
+        PolyTracker poly;     // Poly mode: makes the notes (voice 0 feeds the tuner display and gives Poly its readings)
+        int64_t samplesIn = 0; // input samples since reset (to put voice 0's readings at the right time for Poly)
     };
 
     // =======================================================================
@@ -176,11 +177,15 @@ namespace gl
                 frame (f);
                 if (settings.mode != TrackMode::Poly)
                     hop (v, scaled, offset, emit);
+                else if (vi == 0)
+                    poly.hint (samplesIn + offset + 1, r.hz > 0.0 ? (float) (hzToMidi (r.hz) - centsCorrection (v) / 100.0) : 0.0f,
+                               (float) r.clarity);
             });
 
             if (settings.mode == TrackMode::Poly)
                 poly.process (src, numSamples, emit);
         }
+        samplesIn += numSamples;
     }
 
     template <typename Emit>

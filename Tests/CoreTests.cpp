@@ -1212,6 +1212,32 @@ static void testFullCalibration()
            "attack fingerprints survive save/load");
 }
 
+static void testSetupPreset()
+{
+    // A preset holds the settings, the tuning and the calibration; old preset files are a bare calibration.
+    Calibration cal;
+    cal.valid = true;
+    cal.globalCents = 3.5;
+    cal.tuning = { 62, 57, 53, 48, 43, 38 };
+
+    SetupPreset p;
+    p.settings = { { "trackMode", 3.0f }, { "trackSensitivity", 1.25f } };
+    p.tuning = cal.tuning;
+    p.cal = cal;
+    SetupPreset back;
+    check (back.deserialise (p.serialise()), "preset: loads");
+    check (! back.calibrationOnly && back.settings == p.settings && back.tuning == p.tuning, "preset: settings and tuning survive");
+    check (back.cal.valid && std::abs (back.cal.globalCents - 3.5) < 1e-6 && back.cal.tuning == cal.tuning, "preset: calibration survives");
+
+    SetupPreset noCal;
+    noCal.settings = { { "trackMode", 1.0f } };
+    check (back.deserialise (noCal.serialise()) && ! back.cal.valid && back.settings.size() == 1, "preset: without a calibration");
+
+    check (back.deserialise (cal.serialise()) && back.calibrationOnly && back.cal.valid && back.settings.empty()
+           && back.tuning.empty(), "preset: an old file (bare calibration) loads as calibration only");
+    check (! back.deserialise ("rubbish"), "preset: other text is refused");
+}
+
 static void testCalibrationDraft()
 {
     // An unfinished Full calibration is saved as a draft and goes on after loading, at the same step.
@@ -1488,6 +1514,24 @@ static void testPolyTracking()
         const auto ev = runPoly (audio);
         checkEq (listOf (pitchesStarted (ev)), listOf ({ 45 }), "poly: single A2 gives one note A2");
         checkEq (count (ev, 0x80), 1, "poly: single A2 ends in the silence");
+    }
+
+    // Single notes whose 2nd overtone is twice as loud as the root (common on real guitars): still one note.
+    // The one-note detector hears one clear note, so its overtones are not taken for a chord.
+    for (int note : { 45, 50, 55, 59 })
+    {
+        std::vector<float> audio ((size_t) (0.8 * kRate));
+        const double f = midiToHz (note), twoPi = 2.0 * std::acos (-1.0);
+        for (size_t i = 0; i < audio.size(); ++i)
+        {
+            const double t = i / kRate;
+            double v = 0.0;
+            for (int h = 1; h <= 12; ++h)
+                v += (h == 2 ? 2.0 : h == 3 ? 1.2 : 1.0 / h) * std::sin (twoPi * f * h * t) * std::exp (-t * (1.5 + 0.4 * h));
+            audio[i] = (float) (0.15 * v);
+        }
+        checkEq (listOf (pitchesStarted (runPoly (audio))), listOf ({ note }),
+                 "poly: note " + std::to_string (note) + " with a loud 2nd overtone gives one note");
     }
 
     // Open chords: every note, nothing else, each on its own string.
@@ -1809,6 +1853,7 @@ int main()
     testSpectrum();
     testFullCalibration();
     testCalibrationDraft();
+    testSetupPreset();
     testCalibrationHints();
     testTimbreString();
     testChordTracking();

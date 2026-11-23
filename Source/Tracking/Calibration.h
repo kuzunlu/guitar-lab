@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace gl
@@ -89,6 +90,19 @@ namespace gl
 
         std::string serialise() const;
         void deserialise (const std::string& text);
+    };
+
+    // A preset: the settings (parameter id -> plain value), the strings + tuning, and the calibration (if any).
+    // Old preset files are a bare calibration: they load as a preset with no settings and no tuning.
+    struct SetupPreset
+    {
+        std::vector<std::pair<std::string, float>> settings;
+        std::vector<int> tuning;           // empty = keep the tuning in use
+        Calibration cal;                   // cal.valid == false: no calibration
+        bool calibrationOnly = false;      // read from an old preset file (settings and tuning stay as they are)
+
+        std::string serialise() const;
+        bool deserialise (const std::string& text); // false when the text is neither a preset nor a calibration
     };
 
     // One analysis frame from the audio thread (one per hop, per input channel).

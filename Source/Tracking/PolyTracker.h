@@ -39,6 +39,14 @@ namespace gl
         void prepare (double sampleRate, const Instrument& inst, const Calibration& cal, const Settings& settings);
         void reset();
 
+        // The one-note pitch detector's reading at an input sample (counted since reset): the note it hears and how
+        // clear it is. Given in time order, before process() reaches that sample.
+        void hint (int64_t sample, float midi, float clarity)
+        {
+            if (hintWrite - hintRead < (int) hints.size())
+                hints[(size_t) (hintWrite++ % (int) hints.size())] = { sample, midi, clarity };
+        }
+
         // emit (sampleOffset, status, data1, data2) for each MIDI message.
         template <typename Emit>
         void process (const float* samples, int numSamples, Emit&& emit)
@@ -46,6 +54,7 @@ namespace gl
             if (! prepared) return;
             for (int i = 0; i < numSamples; ++i)
             {
+                ++samplesIn;
                 float x = lp2.process (lp1.process (samples[i]));
                 if (++decimCounter < decimation)
                     continue;
@@ -202,5 +211,13 @@ namespace gl
 
         std::array<Msg, 128> out {};
         int outCount = 0;
+
+        // Readings of the one-note pitch detector (see hint): one clear note = no notes on its overtones.
+        struct Hint { int64_t sample = 0; float midi = 0.0f, clarity = 0.0f; };
+        std::array<Hint, 256> hints {};
+        int hintWrite = 0, hintRead = 0;
+        int64_t samplesIn = 0;
+        int clearNote = -1, clearRun = 0;     // the note heard clearly, and for how many readings in a row
+        bool overtoneOfClearNote (int p) const;
     };
 }
