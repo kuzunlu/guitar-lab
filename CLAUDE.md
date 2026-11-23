@@ -18,7 +18,14 @@ Tab order (= the `Tab` enum in `PluginEditor.h`, = the `addTab` order):
 2. **Play & Write** – play the neck live (drag = bend / slide) and write MIDI phrases (up to 512 bars) with
    hammer-ons, pull-offs, taps, palm mute, dead notes, harmonics, bends, slides, vibrato and strummed chords.
    **Record guitar** writes the tracked notes into the phrase as editable tab (`PhraseRecorder`), with an optional
-   1-bar count-in. Practice/edit tools: loop a section (drag in the ruler), metronome, zoom, multi-select
+   1-bar count-in. **Step input:** in Write mode, fretboard clicks AND real-guitar notes (`TrackerPanel::onTrackedNote`
+   -> `PhrasePanel::guitarNote`, only while this tab is open and Record guitar is off) are written at the cursor;
+   Horizontal moves the cursor on after each note, Vertical stacks them into a chord until Enter / Next step. Vertical
+   never replaces a note: a guitar note whose string is taken on that beat goes to another string with the same pitch
+   (`freeSpot`). A note the tracker moves to another string (note-off + note-on of the same pitch at the same sample)
+   moves in the phrase too; a real unison keeps both. While Write mode is on (tab open, not recording),
+   `proc.stepInputMono` makes `rebuildTracker` swap Poly for Mono (one note at a time: no overtone ghosts);
+   `PhrasePanel::timerTick` sets it back. Practice/edit tools: loop a section (drag in the ruler), metronome, zoom, multi-select
    (Ctrl + click, box drag), copy/cut/paste, move/transpose with buttons or keys. Export: MIDI, text tab, PDF,
    MusicXML, Guitar Pro 3 (`Midi/TabExport`). Gold chord names under the bar numbers show the harmony over time
    (`Midi/ChordTimeline`); "To Reharm Lab" sends them there.

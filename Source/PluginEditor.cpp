@@ -131,6 +131,10 @@ GuitarLabEditor::GuitarLabEditor (GuitarLabProcessor& p)
         tabs.setCurrentTabIndex (ReharmTab);
     };
     trackerPanel.onTuningWanted   = [this] (const std::vector<MidiNote>& t) { instrumentBar.applyTuning (t); };
+    trackerPanel.onTrackedNote    = [this] (int string, int fret, double seconds, int movedFrom)
+    {
+        if (currentTab() == PlayTab) phrasePanel.guitarNote (string, fret, seconds, movedFrom); // only writes what you see
+    };
 
     proc.onStateLoaded = [this] { reloadAll(); };
 

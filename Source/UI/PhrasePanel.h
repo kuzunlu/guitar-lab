@@ -80,6 +80,10 @@ namespace gl
         void fretDragged (FretPos start, double bend, double slide);
         void fretReleased (FretPos pos);
 
+        // A note the tracker sent (real guitar). In Write mode it is written like a click on the fretboard.
+        // movedFrom >= 0: the tracker moved this note from that string (it ended the old note at the same moment).
+        void guitarNote (int string, int fret, double seconds, int movedFrom);
+
         // Marks this panel wants on the fretboard (chord builder notes, selected note).
         std::vector<FretboardComponent::Mark> marks() const;
 
@@ -95,7 +99,10 @@ namespace gl
         void pushUndo();
         void undo();
         void commit();             // after any phrase change
-        void writeNote (FretPos pos);
+        void writeNote (FretPos pos, double at = -1.0); // at >= 0: write there and leave the cursor
+        FretPos freeSpot (FretPos pos, double beat) const;
+        void nextStep();           // the cursor moves on one step (Enter / Next step)
+        bool stacking() const { return directionBox.getSelectedId() == 2; } // Vertical: notes stack into a chord
         void addChordFromBuilder();
         void applyControlsToSelected();
         void loadControlsFrom (const NoteEvent& n);
@@ -132,6 +139,10 @@ namespace gl
         juce::Viewport tabViewport;
 
         juce::ToggleButton writeToggle { "Write mode" };
+        juce::ComboBox directionBox;                     // Horizontal (one after another) / Vertical (a chord)
+        juce::TextButton nextStepButton { "Next step" };
+        struct GuitarWrite { int pitch = 0, trackerString = 0; FretPos spot; double start = 0.0, seconds = 0.0; };
+        std::vector<GuitarWrite> recentGuitar;           // the last notes written from the guitar (to follow string moves)
         juce::ComboBox stepBox, barsBox, techniqueBox, bendBox, bendAmountBox, slideBox;
         juce::Slider   slideDistance, velocity, vibDepth, vibRate, strumMs;
         juce::ToggleButton vibratoToggle { "Vibrato" }, letRingToggle { "Let ring" }, strumDownToggle { "Down strum" };

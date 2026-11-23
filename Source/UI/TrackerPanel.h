@@ -124,6 +124,9 @@ namespace gl
         std::vector<FretboardComponent::Mark> marks() const;
         std::function<void()> onDisplayChanged;
         std::function<void (const std::vector<MidiNote>&)> onTuningWanted; // a loaded preset was made for this tuning
+        // Every note-on the tracker sent. movedFrom >= 0: the same pitch just ended on that string at the same moment
+        // (the tracker moved the note to another string), else -1.
+        std::function<void (int string, int fret, double seconds, int movedFrom)> onTrackedNote;
 
         void resized() override;
         void paint (juce::Graphics&) override;
@@ -167,6 +170,8 @@ namespace gl
         NoteLogView noteLog;
         juce::TextButton clearLogButton { "Clear" };
         std::vector<GuitarLabProcessor::TrackedEvent> trackedBuffer = std::vector<GuitarLabProcessor::TrackedEvent> (1024);
+        int lastOffNote = -1, lastOffString = -1;    // the last note-off (to see a note moved to another string)
+        juce::int64 lastOffSample = -1;
         CalibrationWizard wizard;
 
         struct Last { float hz = 0, clarity = 0, rms = 0; };

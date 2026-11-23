@@ -182,6 +182,7 @@ public:
         uint8_t status = 0, data1 = 0, data2 = 0;
     };
     std::atomic<bool> recordingGuitar { false };
+    std::atomic<bool> stepInputMono { false }; // Play & Write, Write mode (step input): Poly listens like Mono meanwhile
 
     // --- Every note the tracker sends (note log, "Try it", saved clips) ---
     struct TrackedEvent

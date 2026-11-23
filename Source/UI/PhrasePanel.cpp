@@ -367,9 +367,29 @@ namespace gl
         writeToggle.setTooltip ("Write mode\n"
             "Off: clicking the fretboard only plays the note (and sends it to MIDI out right away).\n"
             "On: each click ALSO writes the note into the phrase at the yellow cursor, using the technique, bend, slide "
-            "and vibrato settings below. The cursor then moves forward by one step.\n"
+            "and vibrato settings below. Notes you play on the real guitar are written the same way (while this tab is "
+            "open and Record guitar is off). Meanwhile Poly tracking listens like Mono: the notes come one at a time, "
+            "and Mono does not take a note's overtones for extra notes. It goes back to Poly by itself.\n"
+            "Horizontal / Vertical (next to Add chord) chooses whether the cursor moves on after each note.\n"
             "Shift + click collects notes for a chord (blue rings) in both modes.");
         addAndMakeVisible (writeToggle);
+
+        directionBox.addItem ("Horizontal", 1);
+        directionBox.addItem ("Vertical (chord)", 2);
+        directionBox.setSelectedId (1, juce::dontSendNotification);
+        directionBox.setTooltip ("Write direction (Write mode)\n"
+            "Horizontal: each note is written at the cursor, then the cursor moves on one step (a melody).\n"
+            "Vertical: the notes stay on the cursor's beat and stack into one chord, so you can play a chord one note "
+            "at a time, on the fretboard or on the real guitar. A new note "
+            "never replaces another: a note from the guitar whose string is already used on that beat goes to another "
+            "string with the same pitch. Press Enter or 'Next step' when the chord is complete.");
+        addAndMakeVisible (directionBox);
+
+        nextStepButton.setTooltip ("Next step (Enter)\n"
+            "Moves the cursor on by one step. Use it after a chord in Vertical mode, or to leave a rest in "
+            "Horizontal mode.");
+        nextStepButton.onClick = [this] { nextStep(); };
+        addAndMakeVisible (nextStepButton);
 
         // --- Step ---
         label (stepLabel, "Step", "Step length\nHow long each written note is, and how far the cursor moves after each note.\n"
@@ -672,6 +692,7 @@ namespace gl
         addAndMakeVisible (tabViewport);
 
         memory.remember (writeToggle, "write");
+        memory.remember (directionBox, "direction");
         memory.remember (stepBox, "step");
         memory.remember (techniqueBox, "technique");
         memory.remember (bendBox, "bend");
@@ -710,6 +731,8 @@ namespace gl
     PhrasePanel::~PhrasePanel()
     {
         proc.recordingGuitar = false;
+        if (proc.stepInputMono.exchange (false))
+            proc.rebuildTracker();
 
         auto& w = proc.work;
         w.phraseCursor = tab.cursor;
@@ -926,26 +949,97 @@ namespace gl
         tab.repaint();
     }
 
-    void PhrasePanel::writeNote (FretPos pos)
+    void PhrasePanel::writeNote (FretPos pos, double at)
     {
-        pushUndo();
+        const bool rewrite = at >= 0.0; // a guitar note moved to another string: put it back where it was written
         auto n = noteFromControls (pos);
-        proc.phrase.notes.push_back (n);
+        if (rewrite) n.start = at;
+        auto& notes = proc.phrase.notes;
+        if (std::any_of (notes.begin(), notes.end(), [&] (const NoteEvent& m)
+                         { return m.string == n.string && m.fret == n.fret && std::abs (m.start - n.start) < 1e-9; }))
+            return; // already there (the same click twice)
+
+        pushUndo();
+        notes.push_back (n);
         proc.phrase.sort();
 
         // Select the new note so it can be edited right away.
-        for (int i = 0; i < (int) proc.phrase.notes.size(); ++i)
+        for (int i = 0; i < (int) notes.size(); ++i)
         {
-            const auto& m = proc.phrase.notes[(size_t) i];
+            const auto& m = notes[(size_t) i];
             if (m.string == n.string && m.fret == n.fret && std::abs (m.start - n.start) < 1e-9)
                 tab.selected = i;
         }
 
         tab.selection = { tab.selected };
+        // Vertical: the cursor stays, so the notes stack into one chord (until Enter / Next step).
+        if (! stacking() && ! rewrite)
+        {
+            tab.cursor += stepBeats();
+            if (tab.cursor >= proc.phrase.lengthBeats - 1e-9)
+                tab.cursor = 0.0;
+        }
+        commit();
+    }
+
+    void PhrasePanel::nextStep()
+    {
         tab.cursor += stepBeats();
         if (tab.cursor >= proc.phrase.lengthBeats - 1e-9)
             tab.cursor = 0.0;
-        commit();
+        refresh();
+    }
+
+    FretPos PhrasePanel::freeSpot (FretPos pos, double beat) const
+    {
+        // A string that already has a note on this beat: the same pitch on another free string (the nearest fret).
+        // The tracker only guesses the string, and the same note can be played on several strings.
+        auto used = [&] (int string)
+        {
+            return std::any_of (proc.phrase.notes.begin(), proc.phrase.notes.end(), [&] (const NoteEvent& m)
+                                { return m.string == string && std::abs (m.start - beat) < 1e-9; });
+        };
+        if (! used (pos.string)) return pos;
+        FretPos best = pos;
+        int bestDistance = 1000;
+        for (auto spot : proc.instrument.positionsOf (proc.instrument.tuning()[(size_t) pos.string] + pos.fret))
+            if (! used (spot.string) && std::abs (spot.fret - pos.fret) < bestDistance)
+            {
+                best = spot;
+                bestDistance = std::abs (spot.fret - pos.fret);
+            }
+        return best; // no free string: it stays on its own string (never replaces a note)
+    }
+
+    void PhrasePanel::guitarNote (int string, int fret, double seconds, int movedFrom)
+    {
+        if (! writeToggle.getToggleState() || proc.recordingGuitar.load() || string < 0 || string >= proc.instrument.numStrings()
+            || fret < 0 || fret > kNumFrets)
+            return;
+        const int pitch = proc.instrument.tuning()[(size_t) string] + fret;
+
+        // Poly moved a note to another string (it ended the old one at the same moment): move the written note too.
+        // A real unison on two strings keeps both notes ringing, so it never comes here.
+        if (movedFrom >= 0)
+            for (auto it = recentGuitar.rbegin(); it != recentGuitar.rend(); ++it)
+                if (it->pitch == pitch && it->trackerString == movedFrom && seconds - it->seconds < 0.3)
+                {
+                    auto& notes = proc.phrase.notes;
+                    const auto old = it->spot;
+                    const double start = it->start;
+                    notes.erase (std::remove_if (notes.begin(), notes.end(), [&] (const NoteEvent& m)
+                                 { return m.string == old.string && m.fret == old.fret && std::abs (m.start - start) < 1e-9; }),
+                                 notes.end());
+                    const auto spot = stacking() ? freeSpot ({ string, fret }, start) : FretPos { string, fret };
+                    *it = { pitch, string, spot, start, seconds };
+                    writeNote (spot, start);
+                    return;
+                }
+
+        const auto spot = stacking() ? freeSpot ({ string, fret }, tab.cursor) : FretPos { string, fret };
+        recentGuitar.push_back ({ pitch, string, spot, tab.cursor, seconds });
+        if (recentGuitar.size() > 16) recentGuitar.erase (recentGuitar.begin());
+        writeNote (spot);
     }
 
     void PhrasePanel::addChordFromBuilder()
@@ -1048,6 +1142,15 @@ namespace gl
 
     void PhrasePanel::timerTick()
     {
+        // Write mode: the notes come one at a time, so Poly listens like Mono meanwhile (Mono does not take a note's
+        // overtones for more notes). Back to Poly as soon as this ends.
+        const bool oneAtATime = isShowing() && writeToggle.getToggleState() && ! proc.recordingGuitar.load();
+        if (oneAtATime != proc.stepInputMono.load())
+        {
+            proc.stepInputMono = oneAtATime;
+            proc.rebuildTracker();
+        }
+
         playButton.setButtonText (proc.isInternalPlaying() ? "Stop" : "Play");
 
         if (proc.isCountingIn())
@@ -1360,6 +1463,7 @@ namespace gl
         if (ctrl && (code == 'V' || code == 'v')) { pasteClipboard(); return true; }
         if (ctrl && (code == 'A' || code == 'a')) { selectAll(); return true; }
         if (ctrl && (code == 'Z' || code == 'z')) { undo(); return true; }
+        if (k == juce::KeyPress::returnKey && writeToggle.getToggleState()) { nextStep(); return true; }
         if (code == juce::KeyPress::leftKey)  { moveSelection (-stepBeats()); return true; }
         if (code == juce::KeyPress::rightKey) { moveSelection (stepBeats()); return true; }
         if (code == juce::KeyPress::upKey)    { if (mods.isShiftDown()) moveSelectionString (-1); else transposeSelection (1); return true; }
@@ -1423,13 +1527,14 @@ namespace gl
         put (c, strumDownToggle, 100);
         put (c, strumLabel, 44);       put (c, strumMs, 150);
         put (c, chordButton, 90);
+        put (c, directionBox, 120);    put (c, nextStepButton, 76);
         put (c, deleteButton, 90);
         put (c, undoButton, 60);
         put (c, clearButton, 60);
         put (c, playButton, 60);
         put (c, exportButton, 100);
-        put (c, dragArea, 140);
-        put (c, toReharmButton, 120);
+        put (c, dragArea, 120);
+        put (c, toReharmButton, 110);
 
         auto d = row();
         put (d, loopToggle, 110);      put (d, metronomeToggle, 100);  put (d, countInToggle, 90);

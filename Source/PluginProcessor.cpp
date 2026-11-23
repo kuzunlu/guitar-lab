@@ -121,6 +121,8 @@ void GuitarLabProcessor::rebuildTracker()
 
     gl::TrackerSettings ts;
     ts.mode         = (gl::TrackMode) (int) params.getRawParameterValue (ParamIDs::trackMode)->load();
+    if (ts.mode == gl::TrackMode::Poly && stepInputMono.load())
+        ts.mode = gl::TrackMode::Mono; // notes come one at a time: Mono does not take overtones for more notes
     ts.monoInput    = (int) params.getRawParameterValue (ParamIDs::trackInput)->load() - 1; // 0 = mix -> -1
     ts.stableFrames = (int) params.getRawParameterValue (ParamIDs::trackStability)->load();
     ts.sensitivity  = params.getRawParameterValue (ParamIDs::trackSensitivity)->load();

@@ -1203,8 +1203,19 @@ namespace gl
             const int s = (e.status & 0x0F) + 1 - proc.midiSettings.firstChannel;
             const bool validString = s >= 0 && s < proc.instrument.numStrings();
             const int fret = validString ? e.data1 - proc.instrument.tuning()[(size_t) s] : -1;
-            if ((e.status & 0xF0) == 0x90 && e.data2 > 0) noteLog.noteOn (e.sample, e.data1, validString ? s : -1, fret, e.data2);
-            else                                          noteLog.noteOff (e.sample, e.data1, validString ? s : -1);
+            if ((e.status & 0xF0) == 0x90 && e.data2 > 0)
+            {
+                noteLog.noteOn (e.sample, e.data1, validString ? s : -1, fret, e.data2);
+                const int movedFrom = e.data1 == lastOffNote && e.sample == lastOffSample && lastOffString != s ? lastOffString : -1;
+                if (validString && onTrackedNote) onTrackedNote (s, fret, (double) e.sample / noteLog.rate, movedFrom);
+            }
+            else
+            {
+                noteLog.noteOff (e.sample, e.data1, validString ? s : -1);
+                lastOffNote = e.data1;
+                lastOffString = validString ? s : -1;
+                lastOffSample = e.sample;
+            }
         }
 
         if (wizard.isVisible())
