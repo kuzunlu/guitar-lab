@@ -33,6 +33,9 @@ namespace gl
             voices.resize (1);
             voices[0].inputChannel = std::max (0, settings.monoInput);
             voices[0].detector.prepare (sampleRate, midiToHz (lo - 1.5), midiToHz (hi + 3.0));
+            // Mono only: Poly's clear-note check and the calibration keep the classic window.
+            if (settings.mode == TrackMode::Mono && ! settings.features)
+                voices[0].detector.setWindowWaves (settings.pitchWindow);
         }
         else
         {

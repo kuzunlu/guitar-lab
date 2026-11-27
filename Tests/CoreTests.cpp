@@ -10,6 +10,7 @@
 #include "Theory/Voicing.h"
 #include "Tracking/GuitarTracker.h"
 #include "Tracking/NoteLearner.h"
+#include "Tracking/PickClock.h"
 
 #include <cmath>
 #include <cstdio>
@@ -824,6 +825,27 @@ static void testTracker()
                 checkEq (e.d1, 45, "plucked note is A2 (45)");
                 check (e.offset < (int) (0.06 * kRate), "note starts within 60 ms");
             }
+    }
+
+    // Pitch window (mono): a high E picked right after a low E is read sooner with 4 waves than with the classic
+    // window (which must first fill with the new note), and still as the right note.
+    {
+        auto audio = pluck (0.4, [] (double) { return 82.41; });
+        append (audio, pluck (0.4, [] (double) { return 329.63; }));
+        auto startOfE4 = [&] (double waves)
+        {
+            TrackerSettings w = s;
+            w.pitchWindow = waves;
+            GuitarTracker t;
+            t.prepare (kRate, 512, g, cal, w);
+            for (const auto& e : runTracker (t, audio))
+                if ((e.status & 0xF0) == 0x90 && e.d1 == 64) return (e.offset - 0.4 * kRate) / kRate;
+            return -1.0;
+        };
+        const double classic = startOfE4 (0.0), fast = startOfE4 (4.0);
+        check (classic > 0.0 && fast > 0.0, "pitch window: the high E is found with both windows");
+        check (fast < classic - 0.008, "pitch window: 4 waves find the high E at least 8 ms sooner (classic "
+                                       + std::to_string ((int) (classic * 1000)) + " ms, 4 waves " + std::to_string ((int) (fast * 1000)) + " ms)");
     }
 
     // A whole-step bend: pitch bend messages, no second note.
@@ -2008,8 +2030,54 @@ static void testRecorder()
     }
 }
 
+// The note log's delay: where the pick started, from the input alone.
+static void testPickClock()
+{
+    // Low E picked at 0.2 s, picked again (louder) at 0.8 s while it still rings.
+    auto audio = silenceOf (0.2);
+    mixAt (audio, ksString (40, 1.2, 0.2, 3), 0.2);
+    mixAt (audio, ksString (40, 0.6, 0.6, 5), 0.8);
+
+    // Fed in odd block sizes like a DAW, up to the note-on; then: where was the pick?
+    auto pickFor = [] (const std::vector<float>& a, double noteSeconds, int channels = 1)
+    {
+        PickClock clock;
+        const auto end = std::min (a.size(), (size_t) ((noteSeconds + 0.005) * kRate));
+        std::vector<float> silent (113, 0.0f);
+        for (size_t i = 0; i < end; i += 113)
+        {
+            const int n = (int) std::min<size_t> (113, end - i);
+            const float* ch[] { silent.data(), a.data() + i }; // with 2 channels the guitar is on the second
+            clock.feed (channels == 2 ? ch : ch + 1, channels, n, (int64_t) i);
+        }
+        const auto pick = clock.pickBefore ((int64_t) (noteSeconds * kRate), (int64_t) (0.25 * kRate));
+        return pick < 0 ? -1.0 : (double) pick / kRate;
+    };
+    auto near = [] (double got, double want) { return got >= 0.0 && std::abs (got - want) < 0.0015; };
+
+    check (near (pickFor (audio, 0.23), 0.2), "pick clock: a pick after silence is found to the millisecond");
+    check (pickFor (audio, 0.6) < 0.0, "pick clock: a ringing note is not a pick");
+    check (near (pickFor (audio, 0.825), 0.8), "pick clock: a louder re-pick over a ringing string is found");
+    check (near (pickFor (audio, 0.23, 2), 0.2), "pick clock: hex input, a pick on any channel counts");
+
+    // A hammer-on: the pitch jumps from E2 to A2 at 0.5 s, the loudness does not.
+    auto legato = silenceOf (0.1);
+    append (legato, pluck (0.6, [] (double t) { return t < 0.4 ? 82.41 : 110.0; }, 0.4, 0.5));
+    check (near (pickFor (legato, 0.13), 0.1), "pick clock: the sawtooth's pick is found");
+    check (pickFor (legato, 0.52) < 0.0, "pick clock: a hammer-on has no pick (no delay shown)");
+
+    // Real recordings: the sound often swells slowly for ~40 ms (the pick pressing the string) before the
+    // string is let go. The pick is the sharp jump, not the start of the swell.
+    auto swell = silenceOf (0.1);
+    for (int i = 0; i < (int) (0.04 * kRate); ++i)
+        swell.push_back ((float) (0.003 * std::pow (10.0, i / (0.04 * kRate)) * ((i / 40) % 2 ? 1.0 : -1.0)));
+    append (swell, ksString (45, 0.3, 0.5, 7));
+    check (near (pickFor (swell, 0.17), 0.14), "pick clock: a slow swell before the pick is not the pick");
+}
+
 int main()
 {
+    testPickClock();
     testChordNames();
     testChordSymbols();
     testTabExport();

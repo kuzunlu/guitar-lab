@@ -88,6 +88,24 @@ namespace gl
 
         // YIN step 1+2: difference function for each lag (tau).
         const int w = tauMax;
+        if (windowWaves > 0.0)
+        {
+            // Only the newest `windowWaves` waves of each possible pitch: a high note is read as soon as a few of
+            // its short waves have sounded, instead of waiting for a window sized for the lowest note.
+            const int wMin = std::max (8, (int) (rate * 0.002));
+            for (int tau = 1; tau <= tauMax; ++tau)
+            {
+                const int wt = std::clamp ((int) (windowWaves * tau), wMin, window - tau);
+                double sum = 0.0;
+                for (int j = window - wt; j < window; ++j)
+                {
+                    const double d = (double) frame[(size_t) j] - frame[(size_t) (j - tau)];
+                    sum += d * d;
+                }
+                diff[(size_t) tau] = sum / wt;
+            }
+        }
+        else
         for (int tau = 1; tau <= tauMax; ++tau)
         {
             double sum = 0.0;

@@ -35,8 +35,8 @@ namespace gl
                         public juce::TooltipClient
     {
     public:
-        struct Entry { juce::int64 start = 0, end = -1; int note = 0, string = -1, fret = -1, velocity = 0; bool samePick = false; };
-        void noteOn (juce::int64 sample, int note, int string, int fret, int velocity);
+        struct Entry { juce::int64 start = 0, end = -1, pick = -1; int note = 0, string = -1, fret = -1, velocity = 0; bool samePick = false; };
+        void noteOn (juce::int64 sample, int note, int string, int fret, int velocity, juce::int64 pick);
         void noteOff (juce::int64 sample, int note, int string);
         void clear() { entries.clear(); repaint(); }
         double rate = 48000.0;
@@ -176,6 +176,11 @@ namespace gl
         juce::uint32 presetMessageAt = 0;
         juce::ComboBox modeBox, inputBox;
         juce::Slider safety, sensitivity, hysteresis;
+        juce::Label windowLabel, waitLabel;
+        juce::Slider pitchWindow;               // mono only (shown in mono and hex, greyed out in hex)
+        juce::ComboBox waitBox;                 // poly only (shown instead of the pitch window)
+        int attachedMode = -1;
+        void attachModeKnobs();                 // Speed / safety and Sensitivity: the values of the chosen mode
         juce::ToggleButton bendsToggle { "Track bends / slides / vibrato" }, monitorToggle { "Hear guitar" },
                            soundToggle { "Built-in sound" };
         juce::TextButton calibrateButton { "Calibrate..." }, intonationButton { "Intonation..." }, tunerButton { "Tuner..." };
@@ -197,8 +202,8 @@ namespace gl
         int lastDisplayKey = -1;
 
         using APVTS = juce::AudioProcessorValueTreeState;
-        std::unique_ptr<APVTS::ComboBoxAttachment> modeAtt, inputAtt;
-        std::unique_ptr<APVTS::SliderAttachment> safetyAtt, sensAtt, hystAtt;
+        std::unique_ptr<APVTS::ComboBoxAttachment> modeAtt, inputAtt, waitAtt;
+        std::unique_ptr<APVTS::SliderAttachment> safetyAtt, sensAtt, hystAtt, windowAtt;
         std::unique_ptr<APVTS::ButtonAttachment> bendsAtt, monitorAtt, soundAtt;
     };
 }

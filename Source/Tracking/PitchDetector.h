@@ -40,6 +40,10 @@ namespace gl
         void prepare (double sampleRate, double minHz, double maxHz);
         void reset();
 
+        // 0 = the classic window (sized for the lowest note). > 0 = for each possible pitch, look only at the newest
+        // this-many waves of it: high notes start sooner. 4 is as safe as the classic window on real guitar licks.
+        void setWindowWaves (double waves) { windowWaves = waves; }
+
         // Feeds audio. Calls onHop (offset in this block, result) every hop (~5 ms).
         template <typename Callback>
         void process (const float* samples, int numSamples, Callback&& onHop)
@@ -100,6 +104,7 @@ namespace gl
         double hopSumSq = 0.0;
 
         double threshold = 0.15; // YIN threshold: lower = stricter
+        double windowWaves = 0.0;
         Result latest;
     };
 

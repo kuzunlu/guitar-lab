@@ -31,7 +31,8 @@ const std::vector<const char*>& GuitarLabProcessor::listenedParams()
         ParamIDs::bendRange, ParamIDs::firstChannel, ParamIDs::sendMpe, ParamIDs::syncToHost,
         ParamIDs::internalBpm, ParamIDs::legatoOverlap, ParamIDs::legatoVelocity,
         ParamIDs::trackMode, ParamIDs::trackInput, ParamIDs::trackStability,
-        ParamIDs::trackSensitivity, ParamIDs::trackBends, ParamIDs::trackHysteresis };
+        ParamIDs::trackSensitivity, ParamIDs::trackBends, ParamIDs::trackHysteresis,
+        ParamIDs::trackStabilityPoly, ParamIDs::trackSensitivityPoly, ParamIDs::trackPitchWindow, ParamIDs::trackWaitPoly };
     return ids;
 }
 
@@ -85,6 +86,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout GuitarLabProcessor::createLa
     layout.add (std::make_unique<AudioParameterBool>   (ParameterID { ParamIDs::metronome, 1 },     "Metronome", false));
     layout.add (std::make_unique<AudioParameterFloat>  (ParameterID { ParamIDs::trackHysteresis, 1 }, "Tracking hysteresis",
                     NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.0f));
+    layout.add (std::make_unique<AudioParameterInt>    (ParameterID { ParamIDs::trackStabilityPoly, 1 }, "Poly tracking safety", 1, 8, 3));
+    layout.add (std::make_unique<AudioParameterFloat>  (ParameterID { ParamIDs::trackSensitivityPoly, 1 }, "Poly tracking sensitivity",
+                    NormalisableRange<float> (0.25f, 4.0f, 0.01f, 0.5f), 1.0f));
+    layout.add (std::make_unique<AudioParameterFloat>  (ParameterID { ParamIDs::trackPitchWindow, 1 }, "Mono pitch window",
+                    NormalisableRange<float> (2.0f, 8.0f, 0.5f), 4.0f,
+                    AudioParameterFloatAttributes()
+                        .withStringFromValueFunction ([] (float v, int) { return v >= 7.99f ? String ("full") : String (v, v == std::floor (v) ? 0 : 1); })
+                        .withValueFromStringFunction ([] (const String& t) { return t.trim().startsWithIgnoreCase ("f") ? 8.0f : t.getFloatValue(); })));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::trackWaitPoly, 1 }, "Poly wait after pick",
+                    StringArray { "Off", "11 ms", "21 ms", "43 ms" }, 0));
     return layout;
 }
 
@@ -124,10 +135,15 @@ void GuitarLabProcessor::rebuildTracker()
     if (ts.mode == gl::TrackMode::Poly && stepInputMono.load())
         ts.mode = gl::TrackMode::Mono; // notes come one at a time: Mono does not take overtones for more notes
     ts.monoInput    = (int) params.getRawParameterValue (ParamIDs::trackInput)->load() - 1; // 0 = mix -> -1
-    ts.stableFrames = (int) params.getRawParameterValue (ParamIDs::trackStability)->load();
-    ts.sensitivity  = params.getRawParameterValue (ParamIDs::trackSensitivity)->load();
+    // Speed / safety and Sensitivity of the mode that listens now (Write mode's Mono uses Mono's values).
+    ts.stableFrames = (int) params.getRawParameterValue (ParamIDs::stabilityFor ((int) ts.mode))->load();
+    ts.sensitivity  = params.getRawParameterValue (ParamIDs::sensitivityFor ((int) ts.mode))->load();
     ts.trackBends   = params.getRawParameterValue (ParamIDs::trackBends)->load() > 0.5f;
     ts.hysteresis   = params.getRawParameterValue (ParamIDs::trackHysteresis)->load();
+    const float pitchWindow = params.getRawParameterValue (ParamIDs::trackPitchWindow)->load();
+    ts.pitchWindow  = pitchWindow >= 7.99f ? 0.0 : pitchWindow; // 8 = "full" = the classic window
+    constexpr int kWaitFrames[] = { 0, 1, 2, 4 };               // Off, 11, 21, 43 ms (one poly analysis = ~10.7 ms)
+    ts.waitFrames   = kWaitFrames[std::clamp ((int) params.getRawParameterValue (ParamIDs::trackWaitPoly)->load(), 0, 3)];
     ts.bendRange    = midiSettings.bendRange;
     ts.firstChannel = midiSettings.firstChannel;
     ts.features     = calibrating.load(); // tone colour + chord fingerprints, only needed by the wizard
@@ -455,6 +471,8 @@ void GuitarLabProcessor::processBlock (juce::AudioBuffer<float>& audio, juce::Mi
     const int numCopied = std::min (numSamples, inputCopy.getNumSamples());
     for (int c = 0; c < numIn; ++c)
         inputCopy.copyFrom (c, 0, audio, c, 0, numCopied);
+    if (numIn > 0)
+        pickClock.feed (inputCopy.getArrayOfReadPointers(), numIn, numCopied, samplesProcessed.load());
 
     audio.clear();
 
@@ -601,7 +619,9 @@ void GuitarLabProcessor::processBlock (juce::AudioBuffer<float>& audio, juce::Mi
                     if ((status & 0xE0) == 0x80) // note-on or note-off: for the note log
                     {
                         const auto scope = trackedFifo.write (1);
-                        const TrackedEvent e { samplesProcessed.load() + offset, status, d1, d2 };
+                        TrackedEvent e { samplesProcessed.load() + offset, status, d1, d2 };
+                        if ((status & 0xF0) == 0x90 && d2 > 0)
+                            e.pick = pickClock.pickBefore (e.sample, (juce::int64) (0.25 * currentSampleRate));
                         if (scope.blockSize1 > 0)      trackedStore[(size_t) scope.startIndex1] = e;
                         else if (scope.blockSize2 > 0) trackedStore[(size_t) scope.startIndex2] = e;
                     }
@@ -713,6 +733,17 @@ void GuitarLabProcessor::setStateInformation (const void* data, int sizeInBytes)
 
     auto extra = state.getChildWithName ("GuitarLabData");
     state.removeChild (extra, nullptr);
+
+    // Older projects had one Speed / safety and Sensitivity for every mode: Poly starts from the same values.
+    for (const auto& [shared, poly] : { std::pair { ParamIDs::trackStability, ParamIDs::trackStabilityPoly },
+                                        std::pair { ParamIDs::trackSensitivity, ParamIDs::trackSensitivityPoly } })
+        if (! state.getChildWithProperty ("id", poly).isValid())
+            if (auto old = state.getChildWithProperty ("id", shared); old.isValid())
+            {
+                auto copy = old.createCopy();
+                copy.setProperty ("id", poly, nullptr);
+                state.appendChild (copy, nullptr);
+            }
     params.replaceState (state);
 
     if (extra.isValid())

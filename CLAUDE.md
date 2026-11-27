@@ -130,6 +130,20 @@ Keep `Theory/`, `Midi/` and `Tracking/` free of JUCE, so they stay testable and 
   taught chord, the note is swapped for the whole shape. Do not delay single notes to wait for chords.
 - Mono legato: a pitch jump of 7+ half steps inside a ringing note must hold for 3 readings (~10 ms) before it becomes a
   new note. Such jumps are mostly an overtone read for a moment; on real licks this removed ~70% of the too-high notes.
+- **Mono and Poly have their own knobs** (the owner expects different things from them): Speed / safety and Sensitivity
+  are `trackStability` / `trackSensitivity` for mono and hex, `trackStabilityPoly` / `trackSensitivityPoly` for poly
+  (`ParamIDs::stabilityFor (mode)`; the panel re-attaches the sliders when the mode changes; older projects and presets
+  copy the shared value into the poly one). The tracker uses the values of the mode that listens NOW (Write mode's Mono
+  uses Mono's). Make new tracker settings per mode too.
+- **Pitch window (mono, `trackPitchWindow`, 2..8, 8 = "full" = classic, default 4):** `PitchDetector::setWindowWaves`
+  compares, for each lag, only the newest N waves of that pitch instead of a window sized for the lowest note, so high
+  notes start sooner. Never used by Poly's clear-note check or while calibrating (classic window there).
+- **Wait after pick (poly, `trackWaitPoly`: Off / 11 / 21 / 43 ms = `waitFrames` 0/1/2/4, default Off).** The learned
+  judge is ALWAYS learned with the default settings (wait 0, safety 3), not the knobs: measured on IDMT (benchmark
+  `--detail mismatch`), the default judge is as good or better (found minus wrong) at every other wait / safety than a
+  judge learned at that setting, so the knobs can change without a new calibration. With it, wait 11 ms: single-note
+  licks wrong 40.8% -> 31.5%, found 92.1% -> 91.7%. Hysteresis is greyed out when a learned judge is in use (the judge
+  decides instead of that rule).
 - **Record guitar:** while `proc.recordingGuitar` is true, every tracker MIDI message is stamped with a beat
   and sent through `recordFifo` to `PhrasePanel`, which feeds `PhraseRecorder`. The clock is chosen once when
   recording starts: DAW / Play position if running (notes keep their place in the bar), else a free clock at
@@ -211,6 +225,10 @@ Keep `Theory/`, `Midi/` and `Tracking/` free of JUCE, so they stay testable and 
   into `tunerRing` ONLY while `proc.tunerOn` is true (tuner open). The tuner runs its own YIN on every screen refresh
   (`VBlankAttachment`) and smooths the cents; closed, it costs nothing. **Note log** (`NoteLogView`): every tracker
   note-on/off goes through `trackedFifo` (`popTrackedEvents`), drained by `TrackerPanel::timerTick`.
+  **Delay per note:** the plugin reports 0 latency and puts each MIDI event on its exact sample, so delay = note-on sample
+  minus pick sample. `Tracking/PickClock` (audio thread, fixed memory) keeps the input's peak per 32 samples; a pick =
+  a peak 2x the highest of the ~27 ms before it, moved forward to where the rise reaches 10% of its top (real
+  recordings swell slowly before the string is let go). No pick in the last 250 ms (hammer-on, slide) = no delay shown.
 - **Look (`UI/Theme.h`, one `LookAndFeel` for all tabs):** rounded flat buttons and boxes, calm check boxes, a tab row
   where the open tab is bold and underlined. `theme::primary (button)` fills a button with the accent colour: use it
   only for the one or two main actions of a tab (Calibrate, Listen, Play, Reharmonize, Next...), so the eye finds them.

@@ -9,6 +9,7 @@
 #include "Theory/Voicing.h"
 #include "Tracking/NoteLearner.h"
 #include "Tracking/GuitarTracker.h"
+#include "Tracking/PickClock.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
@@ -39,12 +40,20 @@ namespace ParamIDs
 
     inline constexpr auto trackMode        = "trackMode";
     inline constexpr auto trackInput       = "trackInput";
-    inline constexpr auto trackStability   = "trackStability";
-    inline constexpr auto trackSensitivity = "trackSensitivity";
+    inline constexpr auto trackStability   = "trackStability";   // mono and hex (older projects: every mode)
+    inline constexpr auto trackSensitivity = "trackSensitivity"; // mono and hex (older projects: every mode)
     inline constexpr auto trackBends       = "trackBends";
     inline constexpr auto trackMonitor     = "trackMonitor";
     inline constexpr auto trackHysteresis  = "trackHysteresis";
     inline constexpr auto metronome        = "metronome";
+    inline constexpr auto trackStabilityPoly   = "trackStabilityPoly";   // poly's own Speed / safety
+    inline constexpr auto trackSensitivityPoly = "trackSensitivityPoly"; // poly's own Sensitivity
+    inline constexpr auto trackPitchWindow     = "trackPitchWindow";     // mono: waves the pitch detector looks at (8 = classic)
+    inline constexpr auto trackWaitPoly        = "trackWaitPoly";        // poly: wait after a pick (Off, 11, 21, 43 ms)
+
+    // Speed / safety and Sensitivity are kept per mode: the ids for a tracking mode (see gl::TrackMode).
+    inline const char* stabilityFor (int mode)   { return mode == 3 ? trackStabilityPoly : trackStability; }
+    inline const char* sensitivityFor (int mode) { return mode == 3 ? trackSensitivityPoly : trackSensitivity; }
 }
 
 class GuitarLabProcessor : public juce::AudioProcessor,
@@ -205,6 +214,7 @@ public:
     {
         juce::int64 sample = 0;   // audio samples since the plugin started
         uint8_t status = 0, data1 = 0, data2 = 0;
+        juce::int64 pick = -1;    // note-on: the sample where its pick started (-1 = no pick found, e.g. a hammer-on)
     };
     int popTrackedEvents (TrackedEvent* dest, int maxEvents); // message thread
 
@@ -287,6 +297,7 @@ private:
     juce::AbstractFifo trackedFifo { 4096 };
     std::vector<TrackedEvent> trackedStore = std::vector<TrackedEvent> (4096);
     std::atomic<juce::int64> samplesProcessed { 0 };
+    gl::PickClock pickClock;   // when the guitar was picked (audio thread): the note log shows each note's delay
     static constexpr int kTunerRing = 1 << 19; // ~11 s at 48 kHz: a Full calibration copies each fret and chord from it
     std::vector<float> tunerRing = std::vector<float> ((size_t) kTunerRing);
     std::atomic<int> tunerWrite { 0 };

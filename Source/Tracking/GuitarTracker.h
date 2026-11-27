@@ -28,6 +28,7 @@ namespace gl
         bool   features = false;     // calibration: send tone colour + chord fingerprints with the frames
         double hysteresis = 0.0;     // poly: 0..1, an overtone of a louder, just-picked note needs more energy (0 = off)
         int    waitFrames = 0;       // poly: analyses (~11 ms each) to wait after a pick before deciding (0 = no added delay)
+        double pitchWindow = 0.0;    // mono: waves of each pitch the detector looks at (0 = classic window; see PitchDetector)
     };
 
     // Turns guitar audio into MIDI: notes on per-string channels, pitch bend, velocity.

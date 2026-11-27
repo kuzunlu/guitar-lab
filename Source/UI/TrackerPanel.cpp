@@ -120,9 +120,9 @@ namespace gl
     // =======================================================================
     // NoteLogView
     // =======================================================================
-    void NoteLogView::noteOn (juce::int64 sample, int note, int string, int fret, int velocity)
+    void NoteLogView::noteOn (juce::int64 sample, int note, int string, int fret, int velocity, juce::int64 pick)
     {
-        Entry e { sample, -1, note, string, fret, velocity, false };
+        Entry e { sample, -1, pick, note, string, fret, velocity, false };
         e.samePick = ! entries.empty() && (double) (sample - entries.back().start) < 0.04 * rate;
         if (e.samePick) entries.back().samePick = true;
         entries.push_back (e);
@@ -143,7 +143,20 @@ namespace gl
         auto r = getLocalBounds().reduced (8, 4);
         g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
         g.setColour (theme::textDim);
-        g.drawText ("Notes sent (newest first)", r.removeFromTop (20), juce::Justification::centredLeft);
+        auto header = r.removeFromTop (20);
+        g.drawText ("Notes sent (newest first)", header.removeFromLeft (180), juce::Justification::centredLeft);
+
+        // The typical delay: the middle value of the last 20 notes that had a pick.
+        std::vector<double> delays;
+        for (auto it = entries.rbegin(); it != entries.rend() && delays.size() < 20; ++it)
+            if (it->pick >= 0) delays.push_back ((double) (it->start - it->pick) * 1000.0 / rate);
+        if (! delays.empty())
+        {
+            std::nth_element (delays.begin(), delays.begin() + (long) delays.size() / 2, delays.end());
+            g.setColour (theme::accent);
+            g.drawText ("typical delay " + juce::String (juce::roundToInt (delays[delays.size() / 2])) + " ms",
+                        header.withTrimmedRight (62), juce::Justification::centredLeft);
+        }
         g.setFont (juce::FontOptions (13.0f));
         const int rowH = 18;
         for (auto it = entries.rbegin(); it != entries.rend() && r.getHeight() >= rowH; ++it)
@@ -164,6 +177,11 @@ namespace gl
             const juce::String len = it->end < 0 ? juce::String ("ringing")
                                                  : juce::String ((double) (it->end - it->start) / rate, 2) + " s";
             g.drawText (len, row.removeFromLeft (64), juce::Justification::centredLeft);
+            g.setColour (theme::accent);
+            g.drawText (it->pick >= 0 ? "+" + juce::String (juce::roundToInt ((double) (it->start - it->pick) * 1000.0 / rate)) + " ms"
+                                      : juce::String ("-"),
+                        row.removeFromLeft (56), juce::Justification::centredLeft);
+            g.setColour (theme::textDim);
             g.drawText (juce::String ((double) it->start / rate, 2), row, juce::Justification::centredRight);
         }
     }
@@ -171,7 +189,10 @@ namespace gl
     juce::String NoteLogView::getTooltip()
     {
         return "Notes sent\nEvery note the tracker sent as MIDI, newest at the top: note, string and fret, velocity, how long "
-               "it rang (green = still ringing), and when it started (seconds since the plugin started).\n"
+               "it rang (green = still ringing), its delay, and when it started (seconds since the plugin started).\n"
+               "Delay (yellow, +14 ms): from the pick in the guitar sound to the MIDI note, exact to the sample. It is only "
+               "Guitar Lab's part: your audio interface and DAW buffers add their own delay on top. '-' = no pick was found "
+               "(a hammer-on, pull-off or slide). 'Typical delay' at the top is the middle value of the last 20 picked notes.\n"
                "Notes started by the same pick (within 40 ms) have a yellow band. If you played ONE note and see a band "
                "with several notes, those are overtones taken for notes: try the Hysteresis slider.";
     }
@@ -887,25 +908,53 @@ namespace gl
         inputAtt = std::make_unique<APVTS::ComboBoxAttachment> (proc.params, ParamIDs::trackInput, inputBox);
 
         label (safetyLabel, "Speed / safety", "Speed vs safety\n"
-            "How many 5 ms checks the pitch must stay the same before a note is sent.\n"
+            "How many checks the pitch must stay the same before a note is sent (5 ms each in mono, 11 ms in poly).\n"
             "1-2 = fastest response, but more wrong 'blip' notes on the pick attack.\n"
             "3 = good balance (default). 5-8 = slower, but very few wrong notes.\n"
-            "Low notes always need a little longer, because one wave of a low note takes longer.");
+            "Low notes always need a little longer, because one wave of a low note takes longer.\n"
+            "Mono and poly each keep their own value: this knob shows the one of the mode chosen on the left.");
         safety.setSliderStyle (juce::Slider::LinearHorizontal);
         safety.setTextBoxStyle (juce::Slider::TextBoxRight, false, 34, 20);
         safety.setTooltip (safetyLabel.getTooltip());
         addAndMakeVisible (safety);
-        safetyAtt = std::make_unique<APVTS::SliderAttachment> (proc.params, ParamIDs::trackStability, safety);
 
         label (sensLabel, "Sensitivity", "Sensitivity\n"
             "Higher = soft notes and ghost notes are tracked too, but noise may start notes.\n"
             "Lower = only clear, strong notes are tracked.\n"
-            "1.0 uses the level found by calibration. The yellow line in the level meters shows the result.");
+            "1.0 uses the level found by calibration. The yellow line in the level meters shows the result.\n"
+            "Mono and poly each keep their own value: this knob shows the one of the mode chosen on the left.");
         sensitivity.setSliderStyle (juce::Slider::LinearHorizontal);
         sensitivity.setTextBoxStyle (juce::Slider::TextBoxRight, false, 44, 20);
         sensitivity.setTooltip (sensLabel.getTooltip());
         addAndMakeVisible (sensitivity);
-        sensAtt = std::make_unique<APVTS::SliderAttachment> (proc.params, ParamIDs::trackSensitivity, sensitivity);
+        attachModeKnobs();
+
+        label (windowLabel, "Pitch window", "Pitch window (mono)\n"
+            "How many waves of a note the pitch detector looks at before it names the note.\n"
+            "Fewer = the note is sent sooner, but more wrong notes. More = slower, surer. 'full' = the old window, "
+            "the same length for every note (sized for the lowest string).\n"
+            "4 (default): high notes start about 13 ms sooner than with 'full', with no more wrong notes on real "
+            "guitar licks. The string guess is a little less sure (it hears less of the note before it starts).\n"
+            "Low notes gain little: their waves are long. Watch the delay in 'Notes sent' while you try it.");
+        pitchWindow.setSliderStyle (juce::Slider::LinearHorizontal);
+        pitchWindow.setTextBoxStyle (juce::Slider::TextBoxRight, false, 40, 20);
+        pitchWindow.setTooltip (windowLabel.getTooltip());
+        addAndMakeVisible (pitchWindow);
+        windowAtt = std::make_unique<APVTS::SliderAttachment> (proc.params, ParamIDs::trackPitchWindow, pitchWindow);
+
+        label (waitLabel, "Wait after pick", "Wait after pick (poly)\n"
+            "Poly waits this long after a pick before it decides which notes sound. It hears more of the strum, so "
+            "fewer wrong extra notes, but every note comes later by up to this much.\n"
+            "Off (default) = no added delay. In tests after a Full calibration, 11 ms cut the wrong notes in single-note "
+            "playing by about a fifth and found almost as many notes. Without a calibration, 43 ms removed about 30% of "
+            "the wrong notes in chord licks.\n"
+            "Change it at any time: it does not need a new calibration.");
+        waitBox.addItemList ({ "Off", "11 ms", "21 ms", "43 ms" }, 1);
+        waitBox.setTooltip (waitLabel.getTooltip());
+        addAndMakeVisible (waitBox);
+        waitAtt = std::make_unique<APVTS::ComboBoxAttachment> (proc.params, ParamIDs::trackWaitPoly, waitBox);
+        waitBox.setVisible (false); // the timer shows it (instead of the pitch window) in poly mode
+        waitLabel.setVisible (false);
 
         label (hystLabel, "Hysteresis", "Hysteresis (poly mode)\n"
             "Stops a single note from being heard as a chord. Every guitar note also sounds an octave, an octave + 5th, "
@@ -914,7 +963,9 @@ namespace gl
             "0 = off (the normal behaviour). 1 = strongest: about a third fewer wrong extra notes, but a quiet real "
             "octave strummed together with its lower note may be missed.\n"
             "Arpeggios over ringing strings are not affected, and it never adds delay. Mono and hex modes ignore it "
-            "(it is greyed out there).");
+            "(it is greyed out there).\n"
+            "After a Full calibration it is greyed out too: Poly then uses the judge it learned from your guitar, "
+            "which decides instead of this rule.");
         hysteresis.setSliderStyle (juce::Slider::LinearHorizontal);
         hysteresis.setTextBoxStyle (juce::Slider::TextBoxRight, false, 40, 20);
         hysteresis.setTooltip (hystLabel.getTooltip());
@@ -927,6 +978,8 @@ namespace gl
             "  - Lead / single notes: the fewest wrong extra notes (a single note is not heard as a chord).\n"
             "  - Rhythm / chords: fewer short 'blip' notes in strums, keeps most quiet octave notes.\n"
             "  - Arpeggios / fingerpicking: also hears quieter notes; notes over ringing strings still start.\n"
+            "It sets the knobs of the mode chosen now. Hysteresis only acts in poly without a Full calibration "
+            "(after one, Lead and Balanced are the same).\n"
             "Change any knob afterwards and this shows 'Custom'.");
         styleBox.addItem ("Custom", 1);
         styleBox.addItem ("Balanced (default)", 2);
@@ -1114,6 +1167,7 @@ namespace gl
         // The parameters a preset holds: everything except the metronome and the tempo (they belong to the song).
         const char* const kPresetParams[] = {
             ParamIDs::trackMode, ParamIDs::trackInput, ParamIDs::trackStability, ParamIDs::trackSensitivity,
+            ParamIDs::trackStabilityPoly, ParamIDs::trackSensitivityPoly, ParamIDs::trackPitchWindow, ParamIDs::trackWaitPoly,
             ParamIDs::trackHysteresis, ParamIDs::trackBends, ParamIDs::trackMonitor,
             ParamIDs::bendRange, ParamIDs::firstChannel, ParamIDs::sendMpe, ParamIDs::passThrough,
             ParamIDs::synthOn, ParamIDs::synthVolume, ParamIDs::synthTone,
@@ -1141,6 +1195,15 @@ namespace gl
                 if (id == known)
                     if (auto* p = proc.params.getParameter (known))
                         setParam (*p, p->convertTo0to1 (value));
+
+        // Older presets had one Speed / safety and Sensitivity for every mode: Poly gets the same values.
+        auto has = [&preset] (const char* id) { return std::any_of (preset.settings.begin(), preset.settings.end(),
+                                                                    [id] (const auto& s) { return s.first == id; }); };
+        for (const auto& [shared, poly] : { std::pair { ParamIDs::trackStability, ParamIDs::trackStabilityPoly },
+                                            std::pair { ParamIDs::trackSensitivity, ParamIDs::trackSensitivityPoly } })
+            if (has (shared) && ! has (poly))
+                if (auto* p = proc.params.getParameter (poly))
+                    setParam (*p, p->convertTo0to1 (proc.params.getRawParameterValue (shared)->load()));
 
         proc.calibration = preset.cal; // a preset saved without a calibration = no calibration
         // A calibration belongs to the tuning it was made for: switch to it.
@@ -1208,6 +1271,17 @@ namespace gl
         refreshPresets();
     }
 
+    void TrackerPanel::attachModeKnobs()
+    {
+        const int mode = (int) trackMode (proc);
+        if (mode == attachedMode) return;
+        attachedMode = mode;
+        safetyAtt.reset(); // detach first: the new attachment sets the slider to the other mode's value
+        sensAtt.reset();
+        safetyAtt = std::make_unique<APVTS::SliderAttachment> (proc.params, ParamIDs::stabilityFor (mode), safety);
+        sensAtt = std::make_unique<APVTS::SliderAttachment> (proc.params, ParamIDs::sensitivityFor (mode), sensitivity);
+    }
+
     namespace
     {
         struct Style { int id; float safety, sensitivity, hysteresis; };
@@ -1219,8 +1293,9 @@ namespace gl
         for (const auto& st : kStyles)
         {
             if (st.id != id) continue;
-            const std::pair<const char*, float> values[] = { { ParamIDs::trackStability, st.safety },
-                                                             { ParamIDs::trackSensitivity, st.sensitivity },
+            const int mode = (int) trackMode (proc); // the knobs of the mode chosen now
+            const std::pair<const char*, float> values[] = { { ParamIDs::stabilityFor (mode), st.safety },
+                                                             { ParamIDs::sensitivityFor (mode), st.sensitivity },
                                                              { ParamIDs::trackHysteresis, st.hysteresis } };
             for (const auto& [paramId, v] : values)
                 if (auto* p = proc.params.getParameter (paramId))
@@ -1234,8 +1309,9 @@ namespace gl
 
     int TrackerPanel::matchingStyle() const
     {
-        const float safety = proc.params.getRawParameterValue (ParamIDs::trackStability)->load();
-        const float sens = proc.params.getRawParameterValue (ParamIDs::trackSensitivity)->load();
+        const int mode = (int) trackMode (proc);
+        const float safety = proc.params.getRawParameterValue (ParamIDs::stabilityFor (mode))->load();
+        const float sens = proc.params.getRawParameterValue (ParamIDs::sensitivityFor (mode))->load();
         const float hyst = proc.params.getRawParameterValue (ParamIDs::trackHysteresis)->load();
         for (const auto& st : kStyles)
             if (std::abs (safety - st.safety) < 0.01f && std::abs (sens - st.sensitivity) < 0.015f && std::abs (hyst - st.hysteresis) < 0.015f)
@@ -1321,9 +1397,27 @@ namespace gl
         if (const int style = matchingStyle(); styleBox.getSelectedId() != style)
             styleBox.setSelectedId (style, juce::dontSendNotification);
 
-        // Hysteresis only works in poly mode: grey it out in the others (the value is kept).
+        // Hysteresis only works in poly mode without a learned judge (the judge decides instead of the rules): grey it
+        // out otherwise (the value is kept).
         const bool poly = trackMode (proc) == TrackMode::Poly;
-        if (hysteresis.isEnabled() != poly) { hysteresis.setEnabled (poly); hystLabel.setEnabled (poly); }
+        const auto& inUse = proc.calibration;
+        const bool judge = inUse.valid && inUse.tuning == proc.instrument.tuning() && inUse.net.usable()
+                           && inUse.net.inputs == PolyTracker::kNumNoteFeatures;
+        if (hysteresis.isEnabled() != (poly && ! judge))
+        {
+            hysteresis.setEnabled (poly && ! judge);
+            hystLabel.setEnabled (poly && ! judge);
+        }
+
+        // Per-mode knobs: Speed / safety and Sensitivity follow the mode; poly shows its wait instead of the pitch window.
+        attachModeKnobs();
+        const bool mono = trackMode (proc) == TrackMode::Mono;
+        if (waitBox.isVisible() != poly)
+        {
+            waitBox.setVisible (poly);   waitLabel.setVisible (poly);
+            pitchWindow.setVisible (! poly); windowLabel.setVisible (! poly);
+        }
+        if (pitchWindow.isEnabled() != mono) { pitchWindow.setEnabled (mono); windowLabel.setEnabled (mono); }
 
         // Notes the tracker sent: into the note log (string from the MIDI channel).
         noteLog.rate = proc.getSampleRate() > 0.0 ? proc.getSampleRate() : 48000.0;
@@ -1336,7 +1430,7 @@ namespace gl
             const int fret = validString ? e.data1 - proc.instrument.tuning()[(size_t) s] : -1;
             if ((e.status & 0xF0) == 0x90 && e.data2 > 0)
             {
-                noteLog.noteOn (e.sample, e.data1, validString ? s : -1, fret, e.data2);
+                noteLog.noteOn (e.sample, e.data1, validString ? s : -1, fret, e.data2, e.pick);
                 const int movedFrom = e.data1 == lastOffNote && e.sample == lastOffSample && lastOffString != s ? lastOffString : -1;
                 if (validString && onTrackedNote) onTrackedNote (s, fret, (double) e.sample / noteLog.rate, movedFrom);
             }
@@ -1356,7 +1450,7 @@ namespace gl
         const auto mode = trackMode (proc);
         const auto& cal = proc.calibration;
         tuner.rows.clear();
-        tuner.gate = cal.gateOn() / std::max (0.25f, proc.params.getRawParameterValue (ParamIDs::trackSensitivity)->load());
+        tuner.gate = cal.gateOn() / std::max (0.25f, proc.params.getRawParameterValue (ParamIDs::sensitivityFor ((int) trackMode (proc)))->load());
         tuner.centsCorrection = cal.valid ? cal.globalCents : 0.0;
 
         if (mode == TrackMode::Mono || mode == TrackMode::Poly)
@@ -1417,6 +1511,11 @@ namespace gl
         put (a, inputLabel, 40);   put (a, inputBox, 150);
         put (a, safetyLabel, 96);  put (a, safety, 150);
         put (a, sensLabel, 74);    put (a, sensitivity, 170);
+        {
+            auto spot = a; // the pitch window (mono, hex) and the wait (poly) share one place
+            put (spot, windowLabel, 86); put (spot, pitchWindow, 150);
+            put (a, waitLabel, 100);     put (a, waitBox, 90);
+        }
 
         auto b = row();
         put (b, bendsToggle, 230);
@@ -1438,7 +1537,7 @@ namespace gl
 
         warning.setBounds (row (20));
         help.setBounds (row (20));
-        auto logArea = r.removeFromRight (juce::jmin (340, r.getWidth() / 3));
+        auto logArea = r.removeFromRight (juce::jmin (400, r.getWidth() / 3));
         r.removeFromRight (6);
         clearLogButton.setBounds (logArea.getRight() - 58, logArea.getY() + 2, 54, 20);
         noteLog.setBounds (logArea);
