@@ -285,10 +285,11 @@ Keep `Theory/`, `Midi/` and `Tracking/` free of JUCE, so they stay testable and 
   `.gitattributes` keeps `*.pdf` binary (else Windows checkout breaks the example PDF in the manual).
 - Release: `git tag vX.Y.Z`, then `powershell -ExecutionPolicy Bypass -File tools\make-release.ps1` (needs the tag on
   the current commit and no uncommitted changes) -> `build\release\` has `Guitar-Lab-vX.Y.Z.zip` (VST3 folder +
-  standalone exe + manual), `Guitar-Lab-Setup-X.Y.Z.exe` and `notes.md`. Then `git push origin vX.Y.Z`, and the owner
-  makes the release on github.com (Releases > Draft a new release > the tag > paste notes.md > add the two files).
-  **Never push a tag unless the owner asks.**
-- This machine cannot reach the GitHub API (no `gh`, `api.github.com` blocked), so the owner publishes releases by hand.
+  standalone exe + manual), `Guitar-Lab-Setup-X.Y.Z.exe` and `notes.md` (add a short "What's new" at the top). Then
+  `git push origin vX.Y.Z` and publish: `gh release create vX.Y.Z <setup exe> <zip> --repo kuzunlu/guitar-lab
+  --title "Guitar Lab vX.Y.Z" --notes-file notes.md` (run in `build\release`).
+  **Never push a tag or publish a release unless the owner asks.**
+- `gh` (GitHub CLI) is installed and logged in as `kuzunlu` (since 2026-11-27; before that the API was blocked).
 
 ## Installer (installer/GuitarLab.iss)
 

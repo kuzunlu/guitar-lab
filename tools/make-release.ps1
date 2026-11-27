@@ -4,7 +4,9 @@
 #   build\release\notes.md                     (text for the release page)
 # Run it on a tagged commit with no uncommitted changes:
 #   powershell -ExecutionPolicy Bypass -File tools\make-release.ps1
-# Then on GitHub: Releases > Draft a new release > choose the tag > paste notes.md > add the zip and the exe > Publish.
+# Then push the tag and publish (in build\release):
+#   gh release create vX.Y.Z Guitar-Lab-Setup-X.Y.Z.exe Guitar-Lab-vX.Y.Z.zip --title "Guitar Lab vX.Y.Z" --notes-file notes.md
+# (or on github.com: Releases > Draft a new release > the tag > paste notes.md > add the two files > Publish).
 
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path -Parent $PSScriptRoot)
