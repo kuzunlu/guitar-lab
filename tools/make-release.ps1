@@ -21,7 +21,7 @@ $iscc = @("$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
 if (-not $iscc) { throw "Inno Setup 6 was not found." }
 
 # build.bat builds the VST3, the standalone app and the tests, then runs the tests.
-cmd /c build.bat
+cmd /c .\build.bat   # ".\": cmd may not search the current folder (NoDefaultCurrentDirectoryInExePath)
 if ($LASTEXITCODE -ne 0) { throw "build.bat failed." }
 
 & $iscc /Q "/DAppVersion=$number" installer\GuitarLab.iss
