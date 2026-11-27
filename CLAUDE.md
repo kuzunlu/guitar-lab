@@ -49,7 +49,7 @@ CMake 4.3.1 (bundled with Build Tools). JUCE is fetched by CMake, pinned to tag 
 cmd /c build.bat      # finds Visual Studio, CMake + Ninja in Release, then runs the tests
 ```
 
-`build.bat` (used locally and by CI) always reconfigures, so the version from `git describe` stays
+`build.bat` (also used by `tools/make-release.ps1`) always reconfigures, so the version from `git describe` stays
 current. The first run downloads JUCE (~2 min). It ends with "All tests passed." and these outputs:
 - `build/GuitarLab_artefacts/Release/VST3/Guitar Lab.vst3`
 - `build/GuitarLab_artefacts/Release/Standalone/Guitar Lab.exe`
@@ -60,7 +60,7 @@ The `build` folder must be a **Ninja** build. If it was made with another genera
 
 The C++ runtime is static (`/MT`), so the plugin needs only Windows' own DLLs (no VC++ redistributable).
 `COPY_PLUGIN_AFTER_BUILD` is off on purpose. Do not install the plugin into system folders without asking.
-Inno Setup is not installed on the dev machine; CI installs it. Do not install it without asking.
+Inno Setup 6.7.3 is installed for the owner's user only (`%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe`).
 
 ### Plugin type and vendor (like MIDI Guitar 3)
 
@@ -90,8 +90,9 @@ Inno Setup is not installed on the dev machine; CI installs it. Do not install i
 | `installer/GuitarLab.iss` | Inno Setup 6 installer script | - |
 | `docs/manual/` | The user manual (`index.html` + `img/`). Shipped in the release zip and the installer | - |
 | `tools/make-manual-images.bat` | Makes `docs/manual/img` from the real plugin window, off-screen (`tools/screenshots`, CMake option `GUITAR_LAB_SCREENSHOTS`, build folder `build-manual`). Run `build.bat` first | - |
-| `build.bat` | Local + CI build (CMake + Ninja with Visual Studio's toolchain), then runs the tests | - |
-| `.github/workflows/build.yml` | CI on every push; a `v*` tag also publishes a GitHub Release | - |
+| `build.bat` | The build (CMake + Ninja with Visual Studio's toolchain), then runs the tests | - |
+| `tools/make-release.ps1` | Builds, tests and packs a release (zip, installer, notes) into `build/release` | - |
+| `README.md`, `LICENSE` | GitHub front page; licence = all rights reserved, JUCE under the JUCE 9 Starter licence | - |
 
 Keep `Theory/`, `Midi/` and `Tracking/` free of JUCE, so they stay testable and could move to another plugin format.
 
@@ -251,23 +252,25 @@ Keep `Theory/`, `Midi/` and `Tracking/` free of JUCE, so they stay testable and 
 - Plugin state (tuning, phrase, trainer stats, reharm input, keyswitches) is saved as plain text inside the
   `GuitarLabData` child of the parameter tree. Keep old fields readable when adding new ones.
 
-## Versioning, CI and releases
+## Versioning and releases
 
 - Version = `git describe --tags --match "v[0-9]*"`, e.g. `v0.1.0` or `v0.1.0-2-gabc1234` (no tag: `dev`).
   CMake passes the number to `juce_add_plugin VERSION` and the full text as `GUITAR_LAB_VERSION`,
-  shown at the right of the top bar. CI checks out with `fetch-depth: 0` so it has the tags.
-- CI (`windows-latest`): `build.bat` (build + tests) -> upload **Guitar-Lab-VST3** and
-  **Guitar-Lab-Standalone** -> build the installer with Inno Setup (installed via choco if missing)
-  -> upload **Guitar-Lab-Installer**. Actions are pinned by commit SHA with a version comment
-  (same pins as the owner's stream-bridge repo).
+  shown at the right of the top bar.
+- **No GitHub Actions** (the owner turned them off; the repo is public). Releases are built on this machine.
+- **Licence:** JUCE is used under the **JUCE 9 Starter licence** (free up to $20,000 revenue or funding in 12 months,
+  donations count), not the AGPLv3. Its rule 2.3: never put the code under an open-source licence that requires
+  sharing source code or free redistribution (no GPL/AGPL; ask the owner before any licence change).
+  Never put JUCE's own source or binaries in the repo (rule 1.17).
 - **Every release ships an updated user manual.** Before tagging: update `docs/manual/index.html` for every
   feature change, run `tools\make-manual-images.bat` so the pictures match, and check that every `<img>` exists.
   `.gitattributes` keeps `*.pdf` binary (else Windows checkout breaks the example PDF in the manual).
-- Release: `git tag vX.Y.Z && git push origin vX.Y.Z` -> CI publishes a GitHub Release with
-  `Guitar-Lab-vX.Y.Z.zip` (VST3 folder + standalone exe) and `Guitar-Lab-Setup-X.Y.Z.exe`.
+- Release: `git tag vX.Y.Z`, then `powershell -ExecutionPolicy Bypass -File tools\make-release.ps1` (needs the tag on
+  the current commit and no uncommitted changes) -> `build\release\` has `Guitar-Lab-vX.Y.Z.zip` (VST3 folder +
+  standalone exe + manual), `Guitar-Lab-Setup-X.Y.Z.exe` and `notes.md`. Then `git push origin vX.Y.Z`, and the owner
+  makes the release on github.com (Releases > Draft a new release > the tag > paste notes.md > add the two files).
   **Never push a tag unless the owner asks.**
-- This machine cannot reach the GitHub API (no `gh`, `api.github.com` blocked), so CI results must be
-  checked by the owner on the Actions page.
+- This machine cannot reach the GitHub API (no `gh`, `api.github.com` blocked), so the owner publishes releases by hand.
 
 ## Installer (installer/GuitarLab.iss)
 

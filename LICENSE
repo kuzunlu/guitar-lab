@@ -1,0 +1,15 @@
+Copyright (c) 2026 Berkay Kürşat Uzunlu. All rights reserved.
+
+The source code of Guitar Lab is published so that people can read it.
+No permission is given to copy, change, or distribute it, in whole or in part,
+without written permission from the copyright holder.
+
+The released plugin and app (the files on the GitHub Releases page) may be
+downloaded and used for free.
+
+Guitar Lab is built with the JUCE framework (https://juce.com), used under the
+JUCE 9 Starter licence (https://juce.com/legal/juce-9-licence/). JUCE itself is
+not part of this repository: CMake downloads it during the build. Anyone who
+builds Guitar Lab needs their own JUCE licence, or must use JUCE under the AGPLv3.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
